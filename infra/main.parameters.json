@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "${AZURE_ENV_NAME}" },
+    "location": { "value": "${AZURE_LOCATION}" },
+    "apiClientId": { "value": "${API_CLIENT_ID}" },
+    "apiAllowedAudience": { "value": "${API_ALLOWED_AUDIENCE}" },
+    "foundryModelName": { "value": "${FOUNDRY_BASE_MODEL_NAME=gpt-4o-mini}" },
+    "foundryModelVersion": { "value": "${FOUNDRY_MODEL_VERSION=2024-07-18}" },
+    "foundryModelSku": { "value": "${FOUNDRY_MODEL_SKU=Standard}" },
+    "foundryModelCapacity": { "value": "${FOUNDRY_MODEL_CAPACITY=1}" },
+    "termGuardVersion": { "value": "${TERM_GUARD_VERSION}" },
+    "checkerVersion": { "value": "${CHECKER_VERSION}" },
+    "slideRenderUrl": { "value": "${SLIDE_RENDER_URL}" },
+    "slideRenderScope": { "value": "${SLIDE_RENDER_SCOPE}" },
+    "sharePointHosts": { "value": "${SHAREPOINT_HOSTS}" },
+    "idRegexes": { "value": "${ID_REGEXES_JSON=[]}" },
+    "sourceLocale": { "value": "${SOURCE_LOCALE}" },
+    "targetLocale": { "value": "${TARGET_LOCALE}" },
+    "maxBase64Mb": { "value": "${MAX_BASE64_MB=10}" },
+    "maxMultipartMb": { "value": "${MAX_MULTIPART_MB=40}" },
+    "passThreshold": { "value": "${PASS_THRESHOLD=85}" },
+    "dtsSkuName": { "value": "${DTS_SKU_NAME=Consumption}" }
+  }
+}

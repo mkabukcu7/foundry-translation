@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 
+import reportlab
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -23,7 +24,7 @@ OUT = Path(__file__).parent / "out"
 CLAIM_IT = {
     "policy_numbers": ["POL-2024-558812"],
     "claim_numbers": ["SIN-2025-004471"],
-    "amounts": ["€ 12.450,75", "€ 1.200,00", "€ 11.250,75"],
+    "amounts": ["€ 7.450,75", "€ 5.000,00", "€ 12.450,75", "€ 1.200,00", "€ 11.250,75"],
     "dates": ["14/03/2025", "02/04/2025"],
     "names": ["Giulia Rossetti", "Alberto Ferraro"],
     "addresses": ["Via Garibaldi 42, 20121 Milano"],
@@ -51,6 +52,7 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/Library/Fonts/Arial.ttf",
     "C:/Windows/Fonts/arial.ttf",
+    str(Path(reportlab.__file__).parent / "fonts/Vera.ttf"),
 ]
 
 

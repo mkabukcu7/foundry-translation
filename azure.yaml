@@ -1,0 +1,20 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+name: foundry-translation
+metadata:
+  template: durable-functions-quickstart-python-azd@1.0.0
+services:
+  src:
+    project: ./src/
+    language: python
+    host: function
+hooks:
+  postprovision:
+    windows:
+      shell: pwsh
+      run: ./scripts/postprovision.ps1
+    posix:
+      shell: sh
+      run: ./scripts/postprovision.sh

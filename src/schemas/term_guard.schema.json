@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "terms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "term": {"type": "string"},
+          "type": {"type": "string", "enum": ["policy_number", "claim_number", "name", "address", "amount", "date", "insurance_term", "other"]},
+          "action": {"type": "string", "enum": ["keep", "map"]},
+          "target": {"type": ["string", "null"]}
+        },
+        "required": ["term", "type", "action", "target"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["terms"],
+  "additionalProperties": false
+}

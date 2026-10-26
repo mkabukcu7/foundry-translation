@@ -1,0 +1,7 @@
+-r src/requirements.txt
+-r requirements-spike.txt
+-r renderer/requirements.txt
+httpx>=0.28,<1
+pytest>=8,<9
+ruff>=0.12,<1
+jsonschema>=4.24,<5

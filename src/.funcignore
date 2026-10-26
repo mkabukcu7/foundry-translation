@@ -1,0 +1,11 @@
+.git/
+.gitignore
+.vscode/
+local.settings.json
+.venv/
+.python_packages/
+__pycache__/
+*.py[cod]
+*$py.class
+.funcignore
+.env

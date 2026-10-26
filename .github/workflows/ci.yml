@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Python dependencies
+        run: python -m pip install -r src/requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest
+      - name: Check formatting and lint
+        run: ruff check .
+      - name: Install standalone Bicep
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/Azure/bicep/releases/download/v0.38.33/bicep-linux-x64 -o "$RUNNER_TEMP/bicep"
+          chmod +x "$RUNNER_TEMP/bicep"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Compile infrastructure
+        run: bicep build infra/main.bicep

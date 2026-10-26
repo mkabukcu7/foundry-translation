@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {"type": "string", "enum": ["critical", "major", "minor"]},
+          "type": {"type": "string", "enum": ["omission", "addition", "meaning_shift", "terminology", "number", "tone", "formatting"]},
+          "location": {"type": "string"},
+          "source_excerpt": {"type": "string"},
+          "target_excerpt": {"type": "string"},
+          "explanation": {"type": "string"}
+        },
+        "required": ["severity", "type", "location", "source_excerpt", "target_excerpt", "explanation"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["score", "issues"],
+  "additionalProperties": false
+}

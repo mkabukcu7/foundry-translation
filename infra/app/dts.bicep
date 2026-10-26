@@ -1,0 +1,30 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+param ipAllowlist array
+param location string
+param tags object = {}
+param name string
+param taskhubname string
+param skuName string = 'Consumption'
+
+resource dts 'Microsoft.DurableTask/schedulers@2026-02-01' = {
+  location: location
+  tags: tags
+  name: name
+  properties: {
+    ipAllowlist: ipAllowlist
+    sku: {
+      name: skuName
+    }
+  }
+}
+
+resource taskhub 'Microsoft.DurableTask/schedulers/taskHubs@2026-02-01' = {
+  parent: dts
+  name: taskhubname
+}
+
+output dts_NAME string = dts.name
+output dts_URL string = dts.properties.endpoint
+output TASKHUB_NAME string = taskhub.name

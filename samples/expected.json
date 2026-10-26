@@ -1,0 +1,69 @@
+{
+  "claim_form_it.pdf": {
+    "sourceLanguage": "it",
+    "policy_numbers": [
+      "POL-2024-558812"
+    ],
+    "claim_numbers": [
+      "SIN-2025-004471"
+    ],
+    "amounts": [
+      "€ 7.450,75",
+      "€ 5.000,00",
+      "€ 12.450,75",
+      "€ 1.200,00",
+      "€ 11.250,75"
+    ],
+    "dates": [
+      "14/03/2025",
+      "02/04/2025"
+    ],
+    "names": [
+      "Giulia Rossetti",
+      "Alberto Ferraro"
+    ],
+    "addresses": [
+      "Via Garibaldi 42, 20121 Milano"
+    ]
+  },
+  "scanned_claim_es.pdf": {
+    "sourceLanguage": "es",
+    "policy_numbers": [
+      "POL-2024-771203"
+    ],
+    "claim_numbers": [
+      "SIE-2025-009318"
+    ],
+    "amounts": [
+      "8.320,50 €"
+    ],
+    "dates": [
+      "03/02/2025"
+    ],
+    "names": [
+      "Carmen Ortega Vidal"
+    ],
+    "addresses": [
+      "Calle Mayor 15, 28013 Madrid"
+    ]
+  },
+  "claim_summary_es.pptx": {
+    "sourceLanguage": "es",
+    "policy_numbers": [
+      "POL-2024-330145"
+    ],
+    "claim_numbers": [
+      "SIE-2025-001207"
+    ],
+    "amounts": [
+      "5.600,00 €"
+    ],
+    "dates": [
+      "21/01/2025"
+    ],
+    "names": [
+      "Javier Morales Peña"
+    ],
+    "addresses": []
+  }
+}

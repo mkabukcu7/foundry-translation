@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+samples/out/
+.env
+samples/results/
+src/local.settings.json
+.azure/
+.agent-versions.env
+eval/results.csv
+eval/baseline/*
+!eval/baseline/.gitkeep
+.pytest_cache/
+.ruff_cache/
+*.pyc

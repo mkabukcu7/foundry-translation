@@ -11,8 +11,7 @@ from azure.ai.projects.models import (
     TextResponseFormatJsonSchema,
 )
 
-from services.config import required
-from services.foundry_agents import definition_files, fingerprint, project
+from services.foundry_agents import definition_files, fingerprint, model_name, project
 
 
 def ensure_agent(client, name):
@@ -31,7 +30,7 @@ def ensure_agent(client, name):
     version = client.agents.create_version(
         agent_name=name, metadata={"definitionHash": digest, "jobId": "agent-setup"},
         definition=PromptAgentDefinition(
-            model=required("FOUNDRY_MODEL_NAME"), instructions=prompt,
+            model=model_name(name), instructions=prompt,
             text=PromptAgentDefinitionTextOptions(format=TextResponseFormatJsonSchema(
                 name=name.replace("-", "_"), schema=schema, strict=True,
             )),

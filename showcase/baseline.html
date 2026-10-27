@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Translator only | Translation Lab</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><span class="brand-icon">T</span> Translation Lab <span class="tag">TRANSLATOR ONLY</span></a><span class="local"><span class="dot"></span> LOCALHOST : 8766</span></header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">THE BASELINE / NO FOUNDRY CALLS</p>
+        <h1>Translate the document.<br><span>Inspect the raw result.</span></h1>
+        <p class="intro">Run the same Italian document here and in the assisted showcase. This page uses Azure Translator without a glossary, Term Guard, deterministic quality checks or AI reviewers.</p>
+      </div>
+      <aside class="architecture"><span class="tag">COMPARE IN PARALLEL</span><h3>What is included?</h3>
+        <p>Document Intelligence <span>PDF extraction / OCR</span></p><p>Azure Translator <span>text / native PPTX</span></p>
+        <p>Foundry agents <span>not called</span></p><p>Quality approval <span>not evaluated</span></p>
+        <a href="http://localhost:8765" target="_blank" rel="noopener">Open assisted showcase on 8765 &rarr;</a>
+      </aside>
+    </section>
+    <section class="workspace">
+      <aside class="panel input-panel">
+        <p class="eyebrow">01 / SAME DOCUMENT, NO AGENTS</p><h2>Choose your input</h2>
+        <p class="muted">The samples match those on port 8765. Submit the same upload to both pages for a comparison.</p>
+        <div id="samples" class="sample-list"></div>
+        <div class="divider"><span>or bring your own</span></div>
+        <label class="upload" for="upload"><strong>Choose a PDF or PPTX</strong><span>PDF 40 MiB / native-text PPTX 10 MiB</span><input id="upload" type="file" accept=".pdf,.pptx"></label>
+        <p id="file-name" class="selected-file">Synthetic sample selected</p>
+        <div class="language"><span>Italian <strong>IT</strong></span><span>&rarr;</span><span>English <strong>EN</strong></span></div>
+        <button id="run" class="primary" disabled>Translate only</button>
+        <p class="fine">Real, billable Azure calls using your local Azure identity. PDF extraction/OCR still uses Document Intelligence. No glossary or agent tokens. Local files are sent to the configured Azure services.</p>
+        <hr><p class="eyebrow">SAVED BASELINE RESULTS</p><p class="fine">Reopen without additional Azure calls.</p><div id="history" class="history"></div>
+      </aside>
+      <div class="results">
+        <section class="panel pipeline"><div class="section-heading"><div><p class="eyebrow">02 / BASELINE WORKFLOW</p><h2 id="workflow-title">Ready when you are</h2></div><span id="run-state" class="badge">IDLE</span></div>
+          <ol id="stages">
+            <li data-stage="validate"><b>1</b><span>Validate<small>File safety</small></span></li>
+            <li data-stage="extract"><b>2</b><span>Extract<small>Text / OCR</small></span></li>
+            <li data-stage="translate"><b>3</b><span>Translate<small>No glossary</small></span></li>
+          </ol>
+          <p id="progress-note" class="fine" role="status" aria-live="polite">No Term Guard or reviewer stages are run.</p><p id="error" class="error" role="alert" hidden></p>
+        </section>
+        <section id="empty" class="panel empty"><div class="empty-icon">Aa</div><h2>The translation baseline.</h2><p>No experimental score, no protection claims, no automated approval.<br>Compare this output with the assisted workflow alongside it.</p></section>
+        <div id="result" hidden>
+          <section class="panel">
+            <div class="section-heading"><div><p class="eyebrow">03 / RAW TRANSLATOR OUTPUT</p><h2>Translation finished. Quality not evaluated.</h2></div><span class="badge review">NOT REVIEWED</span></div>
+            <p id="job-id" class="mono fine"></p><div id="metrics" class="metrics"></div>
+            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="report" class="text-link" download>Download usage report &darr;</a></div>
+            <ul id="limitations" class="fine"></ul>
+          </section>
+          <section class="panel"><p class="eyebrow">DOCUMENT VIEW</p><h2>Italian source &amp; English translation</h2>
+            <div class="text-comparison"><div><h3>Italian source</h3><pre id="source-text"></pre></div><div><h3>English translation</h3><pre id="target-text"></pre></div></div>
+            <p class="fine">PDF output is translated text, not the original PDF layout. Native PPTX structure is available in the download. No review watermark is added because no review was performed.</p>
+          </section>
+          <section class="panel"><p class="eyebrow">FAIR COMPARISON</p><h2>What this does &mdash; and does not &mdash; prove</h2>
+            <p class="muted">Both pages use the same extraction and Translator adapters. This page sends no glossary and makes no Foundry calls. Each page makes separate service requests, so outputs and latency can vary.</p>
+            <p class="muted">For PDFs, the assisted page adds terminology analysis and review, not glossary-enforced translation. For PPTX, the assisted page also submits a glossary. A difference in score is not a measured accuracy improvement.</p>
+            <div id="timings" class="fine"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+    <footer>Translator-only baseline <span>Separate localhost / same samples / no cloud storage</span></footer>
+  </main>
+</body>
+</html>

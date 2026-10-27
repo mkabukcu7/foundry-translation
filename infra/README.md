@@ -26,6 +26,10 @@ not recorded. See the repository `LICENSE.md`.
 | `FOUNDRY_MODEL_CAPACITY` | `foundryModelCapacity` | `1` |
 | `TERM_GUARD_VERSION` | `termGuardVersion` | Empty, allowed during initial provisioning |
 | `CHECKER_VERSION` | `checkerVersion` | Empty, allowed during initial provisioning |
+| `TERM_GUARD_MODEL_NAME` | `termGuardModelName` | Empty, falls back to the provisioned deployment |
+| `CHECKER_MODEL_NAME` | `checkerModelName` | Empty, falls back to the provisioned deployment |
+| `MISTRAL_CHECKER_MODEL_NAME` | `mistralCheckerModelName` | Empty, disables independent review |
+| `FOUNDRY_MODEL_ENDPOINT` | `foundryModelEndpoint` | Empty, required with independent review |
 | `SLIDE_RENDER_URL` | `slideRenderUrl` | Empty, external render service optional |
 | `SLIDE_RENDER_SCOPE` | `slideRenderScope` | Empty, configure with the external render service |
 | `SHAREPOINT_HOSTS` | `sharePointHosts` | Empty, comma-separated allowed hosts |
@@ -42,6 +46,11 @@ The model input is deliberately **`FOUNDRY_BASE_MODEL_NAME`**, not
 deployment name, `translation-model`, which the SDK uses for inference.
 Select a model/version/SKU/capacity combination available in the chosen region
 and subscription quota.
+
+Role overrides reference existing deployments; this template does not create those
+additional deployments. For Mistral, use the account's HTTPS `/openai/v1/` endpoint.
+When using deployments in another account, grant the runtime identity inference
+access on that account separately. These values also flow to local settings.
 
 Initial `azd up` is allowed with both agent-version values empty. After creating
 the project/model, run the agent creation helper, set its returned version values

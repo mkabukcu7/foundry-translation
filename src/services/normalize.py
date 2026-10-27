@@ -78,7 +78,9 @@ def compare(source, target, terms, source_locale, target_locale, patterns=None):
     findings = []
     remaining = list(target_items)
     for item in source_items:
-        candidates = [t for t in remaining if t["type"] == item["type"] and t["value"] == item["value"]]
+        # A verbatim value is unchanged even if it retains the source locale's punctuation.
+        candidates = [t for t in remaining if t["type"] == item["type"]
+                      and (t["item"] == item["item"] or t["value"] == item["value"])]
         exact = next((t for t in candidates if t["item"] == item["item"]), None)
         chosen = exact or next(iter(candidates), None)
         findings.append({**item, "match": "exact" if exact else "normalized" if chosen else "unmatched",
@@ -90,12 +92,21 @@ def compare(source, target, terms, source_locale, target_locale, patterns=None):
     target_text = "\n".join(s["text"] for s in target)
     for term in terms:
         expected = term["term"] if term["action"] == "keep" else term["target"]
+        if (term["action"] == "keep" and term["type"] in {"amount", "date"}
+                and any(f["item"] == term["term"] and f["type"] == term["type"]
+                        and f["side"] == "source" for f in findings)):
+            # Structured checks already cover value and multiplicity; do not impose an extra literal check.
+            continue
         # Exact occurrences for keep terms, including multiplicity.
         count = source_text.count(term["term"]) if term["action"] == "keep" else 1
+        mapped = (re.search(r"(?<!\w)" + re.escape(expected) + r"(?!\w)", target_text, re.IGNORECASE)
+                  if term["action"] == "map" else None)
         for i in range(count):
             findings.append({
                 "item": expected, "type": "keep" if term["action"] == "keep" else "map",
-                "location": "document", "match": "exact" if target_text.count(expected) > i else "unmatched",
+                "location": "document",
+                "match": (("exact" if mapped.group() == expected else "normalized") if mapped else "unmatched")
+                if term["action"] == "map" else ("exact" if target_text.count(expected) > i else "unmatched"),
                 "side": "source",
             })
     return findings

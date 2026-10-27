@@ -74,6 +74,18 @@ param termGuardVersion string = ''
 @description('Optional CHECKER_VERSION used by the processing pipeline.')
 param checkerVersion string = ''
 
+@description('Optional existing deployment override for Term Guard.')
+param termGuardModelName string = ''
+
+@description('Optional existing deployment override for the primary checker.')
+param checkerModelName string = ''
+
+@description('Optional existing Mistral deployment; blank disables the second checker.')
+param mistralCheckerModelName string = ''
+
+@description('OpenAI v1 endpoint for the optional second checker.')
+param foundryModelEndpoint string = ''
+
 @description('Optional comma-separated SharePoint host allowlist.')
 param sharePointHosts string = ''
 
@@ -252,6 +264,10 @@ module api './app/api.bicep' = {
       ID_REGEXES_JSON: string(idRegexes)
       TERM_GUARD_VERSION: termGuardVersion
       CHECKER_VERSION: checkerVersion
+      TERM_GUARD_MODEL_NAME: termGuardModelName
+      CHECKER_MODEL_NAME: checkerModelName
+      MISTRAL_CHECKER_MODEL_NAME: mistralCheckerModelName
+      FOUNDRY_MODEL_ENDPOINT: foundryModelEndpoint
       SHAREPOINT_HOSTS: sharePointHosts
       SLIDE_RENDER_URL: slideRenderUrl
       SLIDE_RENDER_SCOPE: slideRenderScope
@@ -316,6 +332,10 @@ output API_IDENTITY_CLIENT_ID string = apiIdentity.outputs.clientId
 output API_IDENTITY_PRINCIPAL_ID string = apiIdentity.outputs.principalId
 output TERM_GUARD_VERSION string = termGuardVersion
 output CHECKER_VERSION string = checkerVersion
+output TERM_GUARD_MODEL_NAME string = termGuardModelName
+output CHECKER_MODEL_NAME string = checkerModelName
+output MISTRAL_CHECKER_MODEL_NAME string = mistralCheckerModelName
+output FOUNDRY_MODEL_ENDPOINT string = foundryModelEndpoint
 output SLIDE_RENDER_URL string = slideRenderUrl
 output SLIDE_RENDER_SCOPE string = slideRenderScope
 output SHAREPOINT_HOSTS string = sharePointHosts

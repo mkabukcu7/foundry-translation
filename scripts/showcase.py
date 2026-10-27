@@ -152,7 +152,7 @@ def create_app(results=RESULTS, *, translator_only=False):
             validate_document(data, filename)
             if filename.lower().endswith(".pptx"):
                 native_pptx_only(data)
-        except ValueError as error:
+        except Exception as error:
             # Validation messages are fixed by our validators; avoid arbitrary parser content.
             logger.warning("jobId=pending validationError=%s", type(error).__name__)
             raise HTTPException(400, "Invalid or unsupported document. Use an unsecured PDF or native-text "

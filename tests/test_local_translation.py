@@ -117,6 +117,47 @@ def test_native_pptx_rejects_images_before_translation(monkeypatch):
     request.assert_not_called()
 
 
+def test_native_pptx_rejects_images_in_inherited_layouts():
+    presentation = Presentation()
+    layout = presentation.slide_layouts[6]
+    slide = presentation.slides.add_slide(layout)
+    image = io.BytesIO()
+    Image.new("RGB", (10, 10), "white").save(image, format="PNG")
+    image.seek(0)
+    picture = slide.shapes.add_picture(image, 0, 0)
+    image_relation = slide.part.rels[picture._element.blipFill.blip.rEmbed]
+    layout_relation = layout.part.relate_to(image_relation.target_part, image_relation.reltype)
+    picture._element.blipFill.blip.rEmbed = layout_relation
+    slide.shapes._spTree.remove(picture._element)
+    layout.shapes._spTree.insert_element_before(picture._element, "p:extLst")
+    output = io.BytesIO()
+    presentation.save(output)
+    with pytest.raises(ValueError, match="native text only"):
+        local_translation.native_pptx_only(output.getvalue())
+
+
+def test_native_pptx_rejects_picture_placeholders():
+    presentation = Presentation()
+    presentation.slides.add_slide(presentation.slide_layouts[8])
+    output = io.BytesIO()
+    presentation.save(output)
+    with pytest.raises(ValueError, match="native text only"):
+        local_translation.native_pptx_only(output.getvalue())
+
+
+def test_cli_failure_reports_only_exception_type_and_job_id(monkeypatch, capsys):
+    from scripts import local_demo
+
+    monkeypatch.setattr("sys.argv", ["local_demo.py", "claim.pdf"])
+    monkeypatch.setattr(local_demo, "run_file", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        ValueError("PRIVATE DOCUMENT EXCERPT")))
+    assert local_demo.main() == 1
+    output = capsys.readouterr()
+    assert "ValueError" in output.err and "jobId=" in output.err
+    assert "PRIVATE DOCUMENT EXCERPT" not in output.err
+    assert "Traceback" not in output.err
+
+
 def test_pdf_workflow_writes_local_report_and_flags_output(monkeypatch, tmp_path):
     from scripts import local_demo
     from services import storage

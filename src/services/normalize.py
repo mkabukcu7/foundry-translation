@@ -76,18 +76,38 @@ def compare(source, target, terms, source_locale, target_locale, patterns=None):
     source_items, target_items = (occurrences(s, loc, patterns) for s, loc in
                                   [(source, source_locale), (target, target_locale)])
     findings = []
-    remaining = list(target_items)
+    candidates = []
     for item in source_items:
-        # A verbatim value is unchanged even if it retains the source locale's punctuation.
-        candidates = [t for t in remaining if t["type"] == item["type"]
-                      and (t["item"] == item["item"] or t["value"] == item["value"])]
-        exact = next((t for t in candidates if t["item"] == item["item"]), None)
-        chosen = exact or next(iter(candidates), None)
-        findings.append({**item, "match": "exact" if exact else "normalized" if chosen else "unmatched",
-                         "side": "source"})
-        if chosen:
-            remaining.remove(chosen)
-    findings.extend({**item, "match": "unmatched", "side": "target"} for item in remaining)
+        matching = [i for i, target_item in enumerate(target_items)
+                    if target_item["type"] == item["type"]
+                    and (target_item["item"] == item["item"] or target_item["value"] == item["value"])]
+        # Prefer verbatim matches without sacrificing a larger normalized assignment.
+        matching.sort(key=lambda i: target_items[i]["item"] != item["item"])
+        candidates.append(matching)
+
+    assigned = {}
+
+    def assign(source_index, seen):
+        for target_index in candidates[source_index]:
+            if target_index in seen:
+                continue
+            seen.add(target_index)
+            if target_index not in assigned or assign(assigned[target_index], seen):
+                assigned[target_index] = source_index
+                return True
+        return False
+
+    for source_index in range(len(source_items)):
+        assign(source_index, set())
+
+    matched_targets = {source_index: target_index for target_index, source_index in assigned.items()}
+    for source_index, item in enumerate(source_items):
+        target_index = matched_targets.get(source_index)
+        chosen = target_items[target_index] if target_index is not None else None
+        findings.append({**item, "match": "exact" if chosen and chosen["item"] == item["item"]
+                         else "normalized" if chosen else "unmatched", "side": "source"})
+    findings.extend({**item, "match": "unmatched", "side": "target"}
+                    for i, item in enumerate(target_items) if i not in assigned)
     source_text = "\n".join(s["text"] for s in source)
     target_text = "\n".join(s["text"] for s in target)
     for term in terms:

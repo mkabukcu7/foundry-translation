@@ -25,8 +25,11 @@ def verify(folder: Path):
     assert "water damage" in text.casefold(), "Expected English translation missing"
     assert re.search(r"EUR\s*500[.,]00", text), "Synthetic amount missing or changed"
     assert report["status"] in ("complete", "needs_review")
-    assert report["checkerAgreement"], "Independent checker results missing"
+    assert report["passB"], "Review results missing"
+    assert report["versions"], "Usage metadata missing"
     assert report["costSignals"]["tokens"] > 0
+    if any(call.get("agent") == "translation-checker-secondary" for call in report["versions"]):
+        assert report["checkerAgreement"], "Independent checker results missing"
     if report["status"] == "needs_review":
         assert "requires review" in text.casefold(), "Flagged output is not marked for review"
     print(json.dumps({"jobId": report["jobId"], "syntheticOutputVerified": True}))

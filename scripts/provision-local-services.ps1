@@ -6,8 +6,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $envPath = Join-Path $PSScriptRoot '..\.env'
-$existing = Get-Content $envPath
-if ($existing -match '^TRANSLATOR_ENDPOINT=' -or $existing -match '^DOCINTEL_ENDPOINT=') {
+$configuredEndpoints = Get-Content $envPath | ForEach-Object {
+    if ($_ -match '^(TRANSLATOR_ENDPOINT|DOCINTEL_ENDPOINT)=(.*)$') {
+        $value = $Matches[2].Trim()
+        if ($value -and $value -notmatch '[<>]') { $value }
+    }
+}
+if ($configuredEndpoints) {
     throw 'Service endpoints already configured; inspect existing resources rather than provisioning duplicates.'
 }
 $principal = az ad signed-in-user show --query id -o tsv

@@ -1,6 +1,8 @@
+import io
 import json
 import threading
 import time
+from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +59,18 @@ def test_rejects_bad_file_and_unknown_samples(client):
     assert client.post("/api/jobs?sample=unknown", headers=HEADERS).status_code == 400
     assert client.post("/api/jobs?filename=big.pptx", content=b"x" * (10 * 1024 * 1024 + 1),
                        headers=HEADERS).status_code == 413
+
+
+def test_malformed_pptx_package_returns_sanitized_validation_error(client):
+    data = io.BytesIO()
+    with ZipFile(data, "w") as archive:
+        archive.writestr(
+            "ppt/presentation.xml",
+            '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+        )
+    response = client.post("/api/jobs?filename=broken.pptx", content=data.getvalue(), headers=HEADERS)
+    assert response.status_code == 400
+    assert "KeyError" not in response.text
 
 
 def test_upload_runs_in_background_saves_and_downloads(client, monkeypatch, tmp_path):

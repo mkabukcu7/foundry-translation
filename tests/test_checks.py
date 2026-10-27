@@ -78,6 +78,12 @@ def test_ambiguous_numeric_punctuation_is_not_reinterpreted_using_any_locale():
     assert any(f["match"] == "unmatched" for f in findings)
 
 
+def test_amount_matching_assigns_the_whole_multiset_before_reporting_unmatched():
+    findings = normalize.compare(segments("EUR 1.000; EUR 1"), segments("EUR 1,000; EUR 1.000"),
+                                 [], "it_IT", "en_US")
+    assert not any(f["match"] == "unmatched" for f in findings)
+
+
 def test_maps_are_case_insensitive_but_not_substring_matches_and_keep_remains_exact():
     terms = [
         {"term": "polizza", "type": "insurance_term", "action": "map", "target": "policy"},

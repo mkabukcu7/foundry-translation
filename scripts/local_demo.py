@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
@@ -111,8 +112,14 @@ def main():
     parser.add_argument("--source-language", default="it")
     parser.add_argument("--target-language", default="en")
     args = parser.parse_args()
-    run_file(args.input, args.output_dir, args.source_language, args.target_language)
+    job_id = uuid4().hex
+    try:
+        run_file(args.input, args.output_dir, args.source_language, args.target_language, job_id=job_id)
+    except Exception as error:
+        print(f"Job failed ({type(error).__name__}); jobId={job_id}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -76,26 +76,72 @@ def compare(source, target, terms, source_locale, target_locale, patterns=None):
     source_items, target_items = (occurrences(s, loc, patterns) for s, loc in
                                   [(source, source_locale), (target, target_locale)])
     findings = []
-    remaining = list(target_items)
+    candidates = []
     for item in source_items:
-        candidates = [t for t in remaining if t["type"] == item["type"] and t["value"] == item["value"]]
-        exact = next((t for t in candidates if t["item"] == item["item"]), None)
-        chosen = exact or next(iter(candidates), None)
-        findings.append({**item, "match": "exact" if exact else "normalized" if chosen else "unmatched",
-                         "side": "source"})
-        if chosen:
-            remaining.remove(chosen)
-    findings.extend({**item, "match": "unmatched", "side": "target"} for item in remaining)
+        matching = [i for i, target_item in enumerate(target_items)
+                    if target_item["type"] == item["type"]
+                    and (target_item["item"] == item["item"] or target_item["value"] == item["value"])]
+        # Prefer verbatim matches without sacrificing a larger normalized assignment.
+        matching.sort(key=lambda i: target_items[i]["item"] != item["item"])
+        candidates.append(matching)
+
+    assigned = {}
+
+    matched_sources = {}
+    for root in range(len(source_items)):
+        pending = [root]
+        parents = {}
+        visited_sources = {root}
+        free_target = None
+        for source_index in pending:
+            for target_index in candidates[source_index]:
+                if target_index in parents:
+                    continue
+                parents[target_index] = source_index
+                owner = assigned.get(target_index)
+                if owner is None:
+                    free_target = target_index
+                    break
+                if owner not in visited_sources:
+                    visited_sources.add(owner)
+                    pending.append(owner)
+            if free_target is not None:
+                break
+        # Flip the alternating path without recursion, including long duplicate runs.
+        while free_target is not None:
+            source_index = parents[free_target]
+            previous = matched_sources.get(source_index)
+            assigned[free_target] = source_index
+            matched_sources[source_index] = free_target
+            free_target = previous
+
+    matched_targets = {source_index: target_index for target_index, source_index in assigned.items()}
+    for source_index, item in enumerate(source_items):
+        target_index = matched_targets.get(source_index)
+        chosen = target_items[target_index] if target_index is not None else None
+        findings.append({**item, "match": "exact" if chosen and chosen["item"] == item["item"]
+                         else "normalized" if chosen else "unmatched", "side": "source"})
+    findings.extend({**item, "match": "unmatched", "side": "target"}
+                    for i, item in enumerate(target_items) if i not in assigned)
     source_text = "\n".join(s["text"] for s in source)
     target_text = "\n".join(s["text"] for s in target)
     for term in terms:
         expected = term["term"] if term["action"] == "keep" else term["target"]
+        if (term["action"] == "keep" and term["type"] in {"amount", "date"}
+                and any(f["item"] == term["term"] and f["type"] == term["type"]
+                        and f["side"] == "source" for f in findings)):
+            # Structured checks already cover value and multiplicity; do not impose an extra literal check.
+            continue
         # Exact occurrences for keep terms, including multiplicity.
         count = source_text.count(term["term"]) if term["action"] == "keep" else 1
+        mapped = (re.search(r"(?<!\w)" + re.escape(expected) + r"(?!\w)", target_text, re.IGNORECASE)
+                  if term["action"] == "map" else None)
         for i in range(count):
             findings.append({
                 "item": expected, "type": "keep" if term["action"] == "keep" else "map",
-                "location": "document", "match": "exact" if target_text.count(expected) > i else "unmatched",
+                "location": "document",
+                "match": (("exact" if mapped.group() == expected else "normalized") if mapped else "unmatched")
+                if term["action"] == "map" else ("exact" if target_text.count(expected) > i else "unmatched"),
                 "side": "source",
             })
     return findings

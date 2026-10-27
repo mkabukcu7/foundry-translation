@@ -46,6 +46,64 @@ def test_exact_keep_and_map():
     assert [f["type"] for f in findings if f["match"] == "unmatched"] == ["keep"]
 
 
+def test_source_format_amount_preserved_in_english_is_not_a_value_change():
+    terms = [{"term": "EUR 500,00", "type": "amount", "action": "keep", "target": None}]
+    for target in ("EUR 500,00", "EUR 500.00"):
+        findings = normalize.compare(segments("EUR 500,00"), segments(target), terms, "it_IT", "en_US")
+        assert all(f["match"] != "unmatched" for f in findings)
+
+
+@pytest.mark.parametrize("target,expected_match", [
+    ("14/03/2025", True), ("03/14/2025", True), ("03/15/2025", False), ("", False),
+])
+def test_date_keep_preserves_value_without_duplicate_literal_penalty(target, expected_match):
+    terms = [{"term": "14/03/2025", "type": "date", "action": "keep", "target": None}]
+    findings = normalize.compare(segments("14/03/2025"), segments(target), terms, "it_IT", "en_US")
+    assert all(f["match"] != "unmatched" for f in findings) is expected_match
+    assert not any(f["type"] == "keep" for f in findings)
+
+
+@pytest.mark.parametrize("target", ["EUR 5000.00", "USD 500.00", "EUR 500.00 EUR 500.00", ""])
+def test_amount_calibration_still_catches_changes_additions_and_omissions(target):
+    findings = normalize.compare(segments("EUR 500,00"), segments(target),
+                                 [{"term": "EUR 500,00", "type": "amount", "action": "keep", "target": None}],
+                                 "it_IT", "en_US")
+    assert any(f["match"] == "unmatched" for f in findings)
+
+
+def test_ambiguous_numeric_punctuation_is_not_reinterpreted_using_any_locale():
+    findings = normalize.compare(segments("EUR 1.000"), segments("EUR 1.000"), [], "it_IT", "en_US")
+    assert all(f["match"] == "exact" for f in findings)
+    findings = normalize.compare(segments("EUR 1.000"), segments("EUR 1.00"), [], "it_IT", "en_US")
+    assert any(f["match"] == "unmatched" for f in findings)
+
+
+def test_amount_matching_assigns_the_whole_multiset_before_reporting_unmatched():
+    findings = normalize.compare(segments("EUR 1.000; EUR 1"), segments("EUR 1,000; EUR 1.000"),
+                                 [], "it_IT", "en_US")
+    assert not any(f["match"] == "unmatched" for f in findings)
+
+
+def test_amount_matching_handles_more_than_a_thousand_repeated_occurrences():
+    findings = normalize.compare(segments("; ".join(["EUR 500,00"] * 1050)),
+                                 segments("; ".join(["EUR 500.00"] * 1050)), [], "it_IT", "en_US")
+    assert len(findings) == 1050
+    assert all(f["match"] == "normalized" for f in findings)
+
+
+def test_maps_are_case_insensitive_but_not_substring_matches_and_keep_remains_exact():
+    terms = [
+        {"term": "polizza", "type": "insurance_term", "action": "map", "target": "policy"},
+        {"term": "Giulia Rossetti", "type": "name", "action": "keep", "target": None},
+    ]
+    good = normalize.compare(segments("Giulia Rossetti polizza"), segments("Giulia Rossetti Policy"),
+                             terms, "it_IT", "en_US")
+    assert all(f["match"] != "unmatched" for f in good)
+    bad = normalize.compare(segments("Giulia Rossetti polizza"), segments("giulia Rossetti policyholder"),
+                            terms, "it_IT", "en_US")
+    assert {f["type"] for f in bad if f["match"] == "unmatched"} == {"keep", "map"}
+
+
 def test_expected_seeded_values_are_preserved_by_identity():
     expected = json.loads(Path("samples/expected.json").read_text())
     for meta in expected.values():

@@ -1,0 +1,116 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Live reviewer calibration regression",
+			"type": "shell",
+			"command": "& .\\scripts\\calibrate-reviews.ps1",
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Translator-only baseline (8766)",
+			"type": "shell",
+			"command": "& .\\scripts\\run-showcase.ps1 -TranslatorOnly",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start localhost translation showcase",
+			"type": "shell",
+			"command": "& .\\scripts\\run-showcase.ps1",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate localhost translation showcase",
+			"type": "shell",
+			"command": "& .\\scripts\\validate-showcase.ps1",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Validate translation agents",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $python = if (Test-Path .env) { ((Get-Content .env | Where-Object { $_ -match '^PYTHON_EXECUTABLE=' } | Select-Object -First 1) -replace '^PYTHON_EXECUTABLE=', '') }; if (-not $python) { $python = '${command:python.interpreterPath}' }; & $python -m pytest -q; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & $python -m ruff check src\\services\\foundry_agents.py src\\activities\\check.py agents tests\\test_foundry_agents.py",
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Create and smoke-test translation agents",
+			"type": "shell",
+			"command": "$ErrorActionPreference = 'Stop'; $env:PYTHONPATH = 'src'; Get-Content .env | ForEach-Object { if ($_ -match '^([A-Z][A-Z0-9_]*)=(.*)$') { Set-Item \"env:$($Matches[1])\" $Matches[2] } }; $python = if ($env:PYTHON_EXECUTABLE) { $env:PYTHON_EXECUTABLE } else { '${command:python.interpreterPath}' }; & $python agents\\create_agents.py --write-env .agent-versions.env; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Get-Content .agent-versions.env | ForEach-Object { $key, $value = $_ -split '=', 2; Set-Item \"env:$key\" $value }; & $python agents\\smoke_test.py",
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify live Foundry agent bindings",
+			"type": "shell",
+			"command": "& .\\agents\\verify_agents.ps1 -SmokeTest",
+			"problemMatcher": []
+		},
+		{
+			"label": "Provision local translation services",
+			"type": "shell",
+			"command": "& .\\scripts\\provision-local-services.ps1 -Subscription '${input:subscription}' -ResourceGroup '${input:resourceGroup}'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Run storage-free translation demo",
+			"type": "shell",
+			"command": "& .\\scripts\\run-local-demo.ps1 -InputFile '${input:localDocument}'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate storage-free workflow",
+			"type": "shell",
+			"command": "& .\\scripts\\validate-local-demo.ps1",
+			"problemMatcher": []
+		},
+		{
+			"label": "Live storage-free scanned PDF",
+			"type": "shell",
+			"command": "& .\\scripts\\run-local-demo.ps1 -InputFile samples\\out\\local_scanned_it.pdf",
+			"problemMatcher": []
+		},
+		{
+			"label": "Live storage-free native PPTX",
+			"type": "shell",
+			"command": "& .\\scripts\\run-local-demo.ps1 -InputFile samples\\out\\local_claim_it.pptx",
+			"problemMatcher": []
+		},
+		{
+			"label": "Live storage-free native PDF",
+			"type": "shell",
+			"command": "& .\\scripts\\run-local-demo.ps1 -InputFile samples\\out\\local_claim_it.pdf",
+			"problemMatcher": []
+		},
+		{
+			"label": "Verify saved synthetic translation outputs",
+			"type": "shell",
+			"command": "$env:PYTHONPATH = 'src'; $python = ((Get-Content .env | Where-Object { $_ -match '^PYTHON_EXECUTABLE=' } | Select-Object -First 1) -replace '^PYTHON_EXECUTABLE=', ''); & $python scripts\\verify_local_demo.py '${input:syntheticResult}'",
+			"problemMatcher": []
+		}
+	],
+	"inputs": [
+		{
+			"id": "syntheticResult",
+			"type": "promptString",
+			"description": "Result directory for a generated synthetic Italian document"
+		},
+		{
+			"id": "localDocument",
+			"type": "promptString",
+			"description": "Local PDF or native-text PPTX path",
+			"default": "samples\\out\\local_scanned_it.pdf"
+		},
+		{
+			"id": "subscription",
+			"type": "promptString",
+			"description": "Approved Azure subscription ID"
+		},
+		{
+			"id": "resourceGroup",
+			"type": "promptString",
+			"description": "Existing resource group"
+		}
+	]
+}

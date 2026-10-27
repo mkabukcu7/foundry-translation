@@ -11,9 +11,10 @@ def client():
     return DocumentIntelligenceClient(required("DOCINTEL_ENDPOINT"), credential(), logging_enable=False)
 
 
-def extract(data: bytes, model: str = "prebuilt-layout", allow_empty=False) -> dict:
+def extract(data: bytes, model: str = "prebuilt-layout", allow_empty=False, job_id: str = "") -> dict:
     result = client().begin_analyze_document(
-        model, body=data, content_type="application/pdf", features=["languages"], logging_enable=False
+        model, body=data, content_type="application/pdf", features=["languages"], logging_enable=False,
+        headers={"x-ms-client-request-id": job_id} if job_id else {},
     ).result(timeout=600)
     paragraphs = [
         {"text": p.content, "role": str(p.role or "paragraph"), "location": f"paragraph:{i + 1}"}
@@ -27,4 +28,5 @@ def extract(data: bytes, model: str = "prebuilt-layout", allow_empty=False) -> d
     if not paragraphs and not allow_empty:
         raise ValueError("Document Intelligence extracted no text")
     languages = sorted(result.languages or [], key=lambda item: item.confidence, reverse=True)
-    return {"segments": paragraphs, "language": languages[0].locale if languages else ""}
+    return {"segments": paragraphs, "language": languages[0].locale if languages else "",
+            "pageCount": len(result.pages or [])}

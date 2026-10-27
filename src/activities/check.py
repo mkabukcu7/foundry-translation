@@ -13,7 +13,7 @@ def review_documents(job, prepared, translated):
         prepared["segments"], translated["segments"], prepared["terms"], source_locale, target_locale,
     )
     pairs = alignment.align(prepared["segments"], translated["segments"], job["fileName"].endswith(".pptx"))
-    reviews, usage = [], []
+    reviews, usage, agreements = [], [], []
     for pair in pairs:
         # Corresponding subdivisions keep each call bounded while retaining both sides.
         source_chunks = chunks(pair["source"])
@@ -26,18 +26,29 @@ def review_documents(job, prepared, translated):
             local_findings = [f for f in findings if f["match"] == "unmatched"
                               and (f["item"] in source_part or f["item"] in target_part)]
             grouped = Counter((f["item"], f["type"], f["side"]) for f in local_findings)
-            review, cost = foundry_agents.invoke("translation-checker", {
+            checked = foundry_agents.review_pair({
                 "location": pair["location"], "part": i + 1,
                 "source": source_part, "target": target_part,
                 "glossary": local_terms,
                 "passA": [{"item": item, "type": kind, "side": side, "count": count, "match": "unmatched"}
                           for (item, kind, side), count in grouped.items()],
             }, job["jobId"])
-            reviews.append(review)
-            usage.append(cost)
+            for review, cost in checked:
+                reviews.append(review)
+                usage.append(cost)
+            if len(checked) == 2:
+                consensus = foundry_agents.agreement(checked[0][0], checked[1][0])
+                consensus["decisionAgreement"] = (
+                    scoring.score([], [checked[0][0]])["decision"]
+                    == scoring.score([], [checked[1][0]])["decision"]
+                )
+                agreements.append({"location": pair["location"], "part": i + 1, **consensus})
     result = scoring.score(findings, reviews)
+    if any(a["disagreement"] or not a["decisionAgreement"] for a in agreements):
+        result["decision"] = "flagged"
     return {
         "jobId": job["jobId"], "passA": findings, "passB": reviews, **result,
+        "checkerAgreement": agreements,
         "versions": usage, "prepareUsage": prepared.get("usage", []),
         "standardGlossaryAvailable": prepared.get("standardGlossaryAvailable", True),
         "costSignals": {

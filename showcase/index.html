@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Translation Lab | Agent showcase</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-icon">T</span> Translation Lab <span class="tag">AGENT SHOWCASE</span></a>
+    <span class="local"><span class="dot"></span> LOCALHOST ONLY</span>
+  </header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">FROM TRANSLATION TO TRUST</p>
+        <h1>Translate the document.<br><span>Show what the agents catch.</span></h1>
+        <p class="intro">Italian to English, with terminology protection and independent AI reviewers.
+          See what Translator produces, what the agents flag, and why a human may need to take a look.</p>
+      </div>
+      <aside class="architecture">
+        <span class="tag">NO CLOUD STORAGE</span>
+        <h3>One document. Four capabilities.</h3>
+        <p>Document Intelligence <span>extract / OCR</span></p>
+        <p>Term Guard agent <span>protect / map</span></p>
+        <p>Azure Translator <span>translate</span></p>
+        <p>Independent reviewers <span>check / compare</span></p>
+        <a class="text-link" href="http://localhost:8766" target="_blank" rel="noopener">Open Translator-only baseline on 8766 &rarr;</a>
+      </aside>
+    </section>
+    <section class="workspace">
+      <aside class="panel input-panel">
+        <p class="eyebrow">01 / CHOOSE A DOCUMENT</p>
+        <h2>Start with a sample</h2>
+        <p class="muted">Synthetic insurance documents. No real customer data.</p>
+        <div id="samples" class="sample-list"></div>
+        <div class="divider"><span>or bring your own</span></div>
+        <label class="upload" for="upload"><strong>Choose a PDF or PPTX</strong><span>PDF up to 40 MiB / PPTX up to 10 MiB</span>
+          <input id="upload" type="file" accept=".pdf,.pptx">
+        </label>
+        <p id="file-name" class="selected-file">No file selected</p>
+        <div class="language"><span>Italian <strong>IT</strong></span><span aria-hidden="true">&rarr;</span><span>English <strong>EN</strong></span></div>
+        <button id="run" class="primary" disabled>Translate &amp; review</button>
+        <p class="fine">Runs real, billable Azure calls using your local Azure identity. Files and reports remain on this machine; document data is sent to the configured Azure AI services.</p>
+        <details class="limitations"><summary>Scope &amp; limitations</summary>
+          <p>PDFs become translated text, not layout-preserved PDFs. Native-text PPTX retains document structure; images and charts are rejected.</p>
+          <p>PDF terms are checked, not applied as a Translator glossary. Review scores are experimental; a pass is not certification.</p>
+        </details>
+        <hr>
+        <p class="eyebrow">SAVED DEMONSTRATIONS</p>
+        <p class="fine">Open an earlier result without making Azure calls. Older CLI results may not include text previews.</p>
+        <div id="history" class="history"></div>
+      </aside>
+      <div class="results">
+        <section class="panel pipeline">
+          <div class="section-heading"><div><p class="eyebrow">02 / FOLLOW THE WORKFLOW</p><h2 id="workflow-title">Ready when you are</h2></div><span id="run-state" class="badge">IDLE</span></div>
+          <ol id="stages">
+            <li data-stage="validate"><b>1</b><span>Validate<small>File safety</small></span></li>
+            <li data-stage="extract"><b>2</b><span>Extract<small>Text / OCR</small></span></li>
+            <li data-stage="prepare"><b>3</b><span>Term Guard<small>Protect / map</small></span></li>
+            <li data-stage="translate"><b>4</b><span>Translate<small>Azure Translator</small></span></li>
+            <li data-stage="check"><b>5</b><span>Dual review<small>Independent checks</small></span></li>
+          </ol>
+          <p id="progress-note" class="fine" role="status" aria-live="polite">Live stages reflect backend progress. Reviewers run in parallel when the secondary model is configured.</p>
+          <p id="error" class="error" role="alert" hidden></p>
+        </section>
+        <section id="empty" class="panel empty">
+          <div class="empty-icon">Aa</div><h2>A translation is only the beginning.</h2>
+          <p>Run a sample to explore protected identifiers, terminology mappings,<br>side-by-side text and independent reviewer findings.</p>
+          <div class="chips"><span>Identifier preservation</span><span>Meaning shifts</span><span>Reviewer disagreement</span></div>
+        </section>
+        <div id="result" hidden>
+          <section class="panel verdict">
+            <div class="section-heading"><div><p class="eyebrow">03 / REVIEW THE EVIDENCE</p><h2 id="verdict"></h2></div><span id="quality-badge" class="badge"></span></div>
+            <p id="verdict-note" class="muted"></p><p id="job-id" class="mono fine"></p>
+            <div class="metrics" id="metrics"></div>
+            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="report" class="text-link" download>Download full report &darr;</a></div>
+            <ul id="result-limitations" class="fine"></ul>
+          </section>
+          <section class="panel">
+            <div class="section-heading"><div><p class="eyebrow">DOCUMENT VIEW</p><h2>Source &amp; translation</h2></div><span class="tag">EXTRACTED TEXT</span></div>
+            <p id="preview-note" class="fine"></p>
+            <div class="text-comparison"><div><h3>Italian source</h3><pre id="source-text"></pre></div><div><h3>English translation</h3><pre id="target-text"></pre></div></div>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">TERM GUARD AGENT</p><h2>What should stay protected?</h2>
+            <p class="muted">Agent proposals merged with the approved glossary. “Keep” protects names/IDs exactly and numeric/date values; “map” requests a target term, allowing normal capitalization.</p>
+            <div class="table-wrap"><table><thead><tr><th>Source term</th><th>Action</th><th>Target</th><th>Category</th></tr></thead><tbody id="terms"></tbody></table></div>
+            <p id="terms-note" class="fine"></p>
+          </section>
+          <section class="panel">
+            <div class="section-heading"><div><p class="eyebrow">INDEPENDENT REVIEWERS</p><h2>Two perspectives, not an average</h2></div></div>
+            <p class="muted">Reviewers see the same translation independently. Unmatched findings or decision disagreement require human review. They do not automatically rewrite the translation.</p>
+            <div id="reviewers" class="reviewers"></div>
+            <details><summary>Per-issue agreement evidence</summary><div id="agreement"></div></details>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">DETERMINISTIC CHECKS &amp; USAGE</p><h2>Keep the details inspectable</h2>
+            <p class="fine">Mapped terms match whole words/phrases without case sensitivity. Names/IDs remain exact; unchanged numeric values may retain source punctuation. Checks and AI reviews are not certification. Charged characters and model tokens are usage signals, not a currency estimate.</p>
+            <details><summary>Preservation and glossary checks</summary><div class="table-wrap"><table><thead><tr><th>Item</th><th>Type</th><th>Match</th><th>Side</th></tr></thead><tbody id="checks"></tbody></table></div></details>
+            <details><summary>Agent calls &amp; step timings</summary><div id="usage"></div></details>
+          </section>
+        </div>
+      </div>
+    </section>
+    <footer>Local translation showcase <span>Managed identity / Entra credentials &middot; No Storage or Scheduler &middot; Human review remains essential</span></footer>
+  </main>
+</body>
+</html>

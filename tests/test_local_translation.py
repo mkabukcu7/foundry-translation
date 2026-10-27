@@ -117,6 +117,25 @@ def test_native_pptx_rejects_images_before_translation(monkeypatch):
     request.assert_not_called()
 
 
+def test_native_pptx_rejects_charts_before_translation(monkeypatch):
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "Native text with unreviewed chart"
+    chart = CategoryChartData()
+    chart.categories = ["Coverage"]
+    chart.add_series("Amount", [500])
+    slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, 0, 0, 1000000, 1000000, chart)
+    output = io.BytesIO()
+    presentation.save(output)
+    request = MagicMock()
+    monkeypatch.setattr(local_translation, "request", request)
+    with pytest.raises(ValueError, match="does not support charts"):
+        local_translation.translate_pptx(output.getvalue(), b"", "it", "en", "job")
+    request.assert_not_called()
+
+
 def test_native_pptx_rejects_images_in_inherited_layouts():
     presentation = Presentation()
     layout = presentation.slide_layouts[6]

@@ -229,8 +229,9 @@ not an unauthenticated HTTP API.
   independent reviewers → local UTF-8 text. The original PDF layout is not retained.
   The glossary is reviewed but **not applied** by Translator Text.
 - Native-text PPTX: extraction → Term Guard → synchronous Document Translation with
-  TSV glossary → independent reviewers → local PPTX. Images are rejected; embedded
-  image OCR is outside this mode. Document limit: 10 MiB; glossary limit: 1 MiB.
+  TSV glossary → independent reviewers → local PPTX. Images and charts are rejected;
+  image OCR and chart extraction/review are outside this mode.
+  Document limit: 10 MiB; glossary limit: 1 MiB.
 
 The synchronous
 [supported formats](https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/overview)

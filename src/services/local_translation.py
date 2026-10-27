@@ -22,6 +22,8 @@ def native_pptx_only(data: bytes):
         if any(part._element.xpath(".//a:blip") for part in parts):
             raise ValueError("Storage-free PPTX mode supports native text only; use a scanned PDF for the OCR demo")
         shapes = (slide.shapes, layout.shapes, layout.slide_master.shapes)
+        if any(shape.has_chart for group in shapes for shape in all_shapes(group)):
+            raise ValueError("Storage-free PPTX mode does not support charts; chart content is not reviewed")
         if any(shape.shape_type == 13 or (
             shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.PICTURE
         ) for group in shapes for shape in all_shapes(group)):

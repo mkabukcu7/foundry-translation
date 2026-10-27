@@ -87,18 +87,33 @@ def compare(source, target, terms, source_locale, target_locale, patterns=None):
 
     assigned = {}
 
-    def assign(source_index, seen):
-        for target_index in candidates[source_index]:
-            if target_index in seen:
-                continue
-            seen.add(target_index)
-            if target_index not in assigned or assign(assigned[target_index], seen):
-                assigned[target_index] = source_index
-                return True
-        return False
-
-    for source_index in range(len(source_items)):
-        assign(source_index, set())
+    matched_sources = {}
+    for root in range(len(source_items)):
+        pending = [root]
+        parents = {}
+        visited_sources = {root}
+        free_target = None
+        for source_index in pending:
+            for target_index in candidates[source_index]:
+                if target_index in parents:
+                    continue
+                parents[target_index] = source_index
+                owner = assigned.get(target_index)
+                if owner is None:
+                    free_target = target_index
+                    break
+                if owner not in visited_sources:
+                    visited_sources.add(owner)
+                    pending.append(owner)
+            if free_target is not None:
+                break
+        # Flip the alternating path without recursion, including long duplicate runs.
+        while free_target is not None:
+            source_index = parents[free_target]
+            previous = matched_sources.get(source_index)
+            assigned[free_target] = source_index
+            matched_sources[source_index] = free_target
+            free_target = previous
 
     matched_targets = {source_index: target_index for target_index, source_index in assigned.items()}
     for source_index, item in enumerate(source_items):

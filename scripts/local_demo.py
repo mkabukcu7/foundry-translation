@@ -81,7 +81,7 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
         "limitations": (["PDF output is extracted/translated text, not the original PDF layout.",
                          ("No glossary or quality review is performed." if translator_only else
                           "The glossary is checked by reviewers, not applied by Translator Text.")] if is_pdf else
-                        ["Native-text PPTX only; embedded-image text translation is not supported."]),
+                        ["Native-text PPTX only; images and charts are not supported."]),
     })
     report["costSignals"].update({
         **translation, "ocrPages": extracted.get("pageCount", 0), "durationsSeconds": durations,

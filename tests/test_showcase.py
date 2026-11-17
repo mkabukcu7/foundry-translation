@@ -6,8 +6,11 @@ from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
+from pptx import Presentation
 
 from scripts import showcase
+from services.config import ReconstructionError, ReviewTimeoutError
 from tests.test_pipeline import pdf
 
 HEADERS = {"Origin": "http://localhost:8765", "X-Showcase-Request": "1"}
@@ -40,6 +43,39 @@ def test_local_page_and_assets(client):
     assert len(client.get("/api/samples").json()) == 3
 
 
+def test_reconstruction_failure_has_safe_error_and_downloadable_partial_text(client, tmp_path, monkeypatch):
+    def fail(source, results, *, job_id, progress, **_):
+        destination = results / job_id
+        destination.mkdir()
+        (destination / "translated.txt").write_text("Machine translation - not reviewed\n\nTranslation")
+        progress("reconstruct")
+        raise ReconstructionError("Translation completed, but PDF reconstruction cannot render this character set.")
+
+    monkeypatch.setattr(showcase, "run_file", fail)
+    response = client.post("/api/jobs?filename=claim.pdf", content=pdf(), headers=HEADERS)
+    job_id = response.json()["jobId"]
+    job = wait_for_job(client, job_id)
+    assert job["state"] == "failed" and job["stage"] == "reconstruct"
+    assert job["partialOutput"] == "translated.txt"
+    assert "character set" in job["error"] and "Azure login" not in job["error"]
+    assert "not reviewed" in client.get(f"/api/jobs/{job_id}/download/translated.txt").text
+
+
+@pytest.mark.parametrize("filename", ["translated.pdf", "translated.pptx", "translated.png",
+                                     "translated.jpeg", "translated.tiff"])
+def test_same_format_output_is_selected_and_downloadable(client, tmp_path, filename):
+    job_id = "f" * 32
+    destination = tmp_path / job_id
+    destination.mkdir()
+    (destination / "report.json").write_text(json.dumps({
+        "jobId": job_id, "status": "not_reviewed", "score": None, "outputFile": filename,
+    }))
+    (destination / filename).write_bytes(b"synthetic-output")
+    (destination / "translated.txt").write_text("Text sidecar")
+    assert client.get(f"/api/jobs/{job_id}").json()["output"] == filename
+    assert client.get(f"/api/jobs/{job_id}/download/{filename}").content == b"synthetic-output"
+
+
 def test_cross_origin_and_rebinding_blocked(client):
     assert client.get("/", headers={"host": "malicious.example:8765"}).status_code == 403
     assert client.post("/api/jobs?sample=scan").status_code == 403
@@ -48,7 +84,7 @@ def test_cross_origin_and_rebinding_blocked(client):
     }).status_code == 403
 
 
-@pytest.mark.parametrize("filename", ["../private.pdf", "C:private.pdf", "report.docx", ""])
+@pytest.mark.parametrize("filename", ["../private.pdf", "C:private.pdf", "report.doc", ""])
 def test_upload_names_are_not_paths(client, filename):
     response = client.post("/api/jobs", params={"filename": filename}, content=b"data", headers=HEADERS)
     assert response.status_code == 400
@@ -57,8 +93,101 @@ def test_upload_names_are_not_paths(client, filename):
 def test_rejects_bad_file_and_unknown_samples(client):
     assert client.post("/api/jobs?filename=bad.pdf", content=b"bad", headers=HEADERS).status_code == 400
     assert client.post("/api/jobs?sample=unknown", headers=HEADERS).status_code == 400
+    assert client.post("/api/jobs?filename=bad.pdf&strategy=unknown", content=b"bad",
+                       headers=HEADERS).status_code == 400
     assert client.post("/api/jobs?filename=big.pptx", content=b"x" * (10 * 1024 * 1024 + 1),
                        headers=HEADERS).status_code == 413
+
+
+@pytest.mark.parametrize("translator_only,strategy", [
+    (False, "translator"), (False, "direct_gpt"), (False, "translator_refine"), (True, "translator"),
+])
+@pytest.mark.parametrize("skip_review", [False, True])
+def test_spanish_upload_passes_language_to_runner(monkeypatch, tmp_path, translator_only, strategy, skip_review):
+    monkeypatch.setenv("SHOWCASE_SKIP_REVIEW", str(skip_review).lower())
+    seen = []
+
+    def run_file(source, results, *, job_id, progress, source_language, target_language, **options):
+        assert target_language == "en"
+        seen.append((source_language, options))
+        destination = results / job_id
+        destination.mkdir()
+        report = {"jobId": job_id, "status": "complete", "score": 100, "sourceLanguage": source_language}
+        (destination / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        (destination / "translated.txt").write_text("Policy", encoding="utf-8")
+        return report
+
+    monkeypatch.setattr(showcase, "run_file", run_file)
+    port = 8766 if translator_only else 8765
+    headers = {**HEADERS, "Origin": f"http://localhost:{port}"}
+    with TestClient(showcase.create_app(tmp_path, translator_only=translator_only),
+                    base_url=f"http://localhost:{port}") as client:
+        assert client.get("/api/config").json()["reviewEnabled"] is not (translator_only or skip_review)
+        response = client.post(
+            "/api/jobs", params={"filename": "spanish.pdf", "sourceLanguage": "es", "strategy": strategy},
+            content=pdf(), headers=headers,
+        )
+        assert response.status_code == 202
+        assert wait_for_job(client, response.json()["jobId"])["report"]["sourceLanguage"] == "es"
+    options = {"translator_only": True} if translator_only else {"strategy": strategy}
+    if skip_review and not translator_only:
+        options["skip_review"] = True
+    assert seen == [("es", options)]
+
+
+@pytest.mark.parametrize("query", ["sourceLanguage=fr", "sourceLanguage=", "sourceLanguage=es&sample=scan",
+                                 "targetLanguage=fr", "targetLanguage=", "sourceLanguage=en",
+                                 "sourceLanguage=es&targetLanguage=es"])
+def test_invalid_or_mismatched_source_language_is_rejected(client, query):
+    response = client.post(f"/api/jobs?filename=claim.pdf&{query}", content=pdf(), headers=HEADERS)
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("source_language,target_language", [
+    ("en", "es"), ("es", "en"), ("en", "it"), ("it", "en"), ("es", "it"), ("it", "es"),
+])
+@pytest.mark.parametrize("strategy", ["translator", "direct_gpt", "translator_refine"])
+def test_bidirectional_language_pair_reaches_runner(monkeypatch, tmp_path, source_language, target_language, strategy):
+    seen = []
+
+    def run_file(source, results, *, job_id, progress, source_language, target_language, **options):
+        seen.append((source_language, target_language, options["strategy"]))
+        destination = results / job_id
+        destination.mkdir()
+        report = {"jobId": job_id, "status": "not_reviewed", "score": None,
+                  "sourceLanguage": source_language, "targetLanguage": target_language}
+        (destination / "report.json").write_text(json.dumps(report))
+        return report
+
+    monkeypatch.setattr(showcase, "run_file", run_file)
+    with TestClient(showcase.create_app(tmp_path), base_url="http://localhost:8765") as client:
+        response = client.post("/api/jobs", params={
+            "filename": "test.pdf", "sourceLanguage": source_language, "targetLanguage": target_language,
+            "strategy": strategy,
+        }, content=pdf(), headers=HEADERS)
+        assert response.status_code == 202
+        job = wait_for_job(client, response.json()["jobId"])
+        assert job["report"]["targetLanguage"] == target_language
+    assert seen == [(source_language, target_language, strategy)]
+
+
+@pytest.mark.parametrize("target_language", ["es", "it"])
+def test_baseline_accepts_english_source_and_non_english_target(monkeypatch, tmp_path, target_language):
+    def run_file(source, results, *, job_id, source_language, target_language, translator_only, **_):
+        assert source_language == "en" and translator_only
+        destination = results / job_id
+        destination.mkdir()
+        report = {"jobId": job_id, "status": "not_reviewed", "score": None, "targetLanguage": target_language}
+        (destination / "report.json").write_text(json.dumps(report))
+        return report
+
+    monkeypatch.setattr(showcase, "run_file", run_file)
+    with TestClient(showcase.create_app(tmp_path, translator_only=True), base_url="http://localhost:8766") as client:
+        response = client.post("/api/jobs", params={
+            "filename": "test.pdf", "sourceLanguage": "en", "targetLanguage": target_language,
+        }, content=pdf(), headers={**HEADERS, "Origin": "http://localhost:8766"})
+        assert response.status_code == 202
+        assert wait_for_job(client, response.json()["jobId"])["report"]["targetLanguage"] == target_language
 
 
 def test_malformed_pptx_package_returns_sanitized_validation_error(client):
@@ -73,8 +202,62 @@ def test_malformed_pptx_package_returns_sanitized_validation_error(client):
     assert "KeyError" not in response.text
 
 
+def test_image_pptx_upload_is_accepted_for_ocr_translation(client, monkeypatch, tmp_path):
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    image = io.BytesIO()
+    Image.new("RGB", (10, 10), "white").save(image, format="PNG")
+    image.seek(0)
+    slide.shapes.add_picture(image, 0, 0)
+    data = io.BytesIO()
+    presentation.save(data)
+
+    def run_file(source, results, *, job_id, progress, strategy, source_language, target_language):
+        assert strategy == "translator"
+        destination = results / job_id
+        destination.mkdir()
+        report = {"jobId": job_id, "status": "needs_review", "score": 70}
+        (destination / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        (destination / "translated.txt").write_text("Marketing text", encoding="utf-8")
+        return report
+
+    monkeypatch.setattr(showcase, "run_file", run_file)
+    response = client.post(
+        "/api/jobs?filename=marketing.pptx&strategy=translator",
+        content=data.getvalue(),
+        headers=HEADERS,
+    )
+    assert response.status_code == 202
+    assert wait_for_job(client, response.json()["jobId"])["state"] == "finished"
+
+
+def test_standalone_image_upload_is_accepted_for_ocr_translation(client, monkeypatch, tmp_path):
+    image = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(image, format="PNG")
+
+    def run_file(source, results, *, job_id, progress, strategy, source_language, target_language):
+        assert source.name == "marketing.png"
+        assert source.read_bytes().startswith(b"\x89PNG")
+        destination = results / job_id
+        destination.mkdir()
+        report = {"jobId": job_id, "status": "needs_review", "score": 70}
+        (destination / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        (destination / "translated.txt").write_text("Marketing text", encoding="utf-8")
+        return report
+
+    monkeypatch.setattr(showcase, "run_file", run_file)
+    response = client.post(
+        "/api/jobs?filename=marketing.png&strategy=direct_gpt",
+        content=image.getvalue(),
+        headers=HEADERS,
+    )
+    assert response.status_code == 202
+    assert wait_for_job(client, response.json()["jobId"])["state"] == "finished"
+
+
 def test_upload_runs_in_background_saves_and_downloads(client, monkeypatch, tmp_path):
-    def run_file(source, results, *, job_id, progress):
+    def run_file(source, results, *, job_id, progress, strategy, source_language, target_language):
+        assert strategy == "direct_gpt"
         assert source.read_bytes().startswith(b"%PDF")
         progress("check")
         destination = results / job_id
@@ -87,7 +270,7 @@ def test_upload_runs_in_background_saves_and_downloads(client, monkeypatch, tmp_
         return report
 
     monkeypatch.setattr(showcase, "run_file", run_file)
-    response = client.post("/api/jobs?filename=claim.pdf", content=pdf(), headers=HEADERS)
+    response = client.post("/api/jobs?filename=claim.pdf&strategy=direct_gpt", content=pdf(), headers=HEADERS)
     assert response.status_code == 202
     job_id = response.json()["jobId"]
     job = wait_for_job(client, job_id)
@@ -102,7 +285,7 @@ def test_upload_runs_in_background_saves_and_downloads(client, monkeypatch, tmp_
 def test_busy_and_sanitized_failure(client, monkeypatch, caplog):
     started, release = threading.Event(), threading.Event()
 
-    def fail(source, results, *, job_id, progress):
+    def fail(source, results, *, job_id, progress, strategy, source_language, target_language):
         progress("prepare")
         started.set()
         assert release.wait(5)
@@ -134,6 +317,19 @@ def test_old_reports_remain_viewable(client, tmp_path):
     assert response["state"] == "finished" and response["preview"] is None
 
 
+def test_reviewer_timeout_shows_safe_actionable_message(client, monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise ReviewTimeoutError("translation-checker-secondary", 600)
+
+    monkeypatch.setattr(showcase, "run_file", fail)
+    response = client.post("/api/jobs?filename=claim.pdf", content=pdf(), headers=HEADERS)
+    job = wait_for_job(client, response.json()["jobId"])
+    assert job["state"] == "failed"
+    assert "translation-checker-secondary" in job["error"]
+    assert "600s" in job["error"] and "quality review is incomplete" in job["error"]
+    assert "Check Azure login" not in job["error"]
+
+
 def test_sample_run_uses_only_allowlisted_path(client, monkeypatch, tmp_path):
     sample_folder = tmp_path / "samples" / "out"
     sample_folder.mkdir(parents=True)
@@ -142,7 +338,8 @@ def test_sample_run_uses_only_allowlisted_path(client, monkeypatch, tmp_path):
     monkeypatch.setattr(showcase, "ROOT", tmp_path)
     seen = []
 
-    def run_file(source, results, *, job_id, progress):
+    def run_file(source, results, *, job_id, progress, strategy, source_language, target_language):
+        assert strategy == "translator"
         seen.append((source.name, source.read_bytes()))
         destination = results / job_id
         destination.mkdir()
@@ -160,7 +357,7 @@ def test_sample_run_uses_only_allowlisted_path(client, monkeypatch, tmp_path):
 
 
 def test_baseline_separate_port_origin_and_runner(monkeypatch, tmp_path):
-    def run_file(source, results, *, job_id, progress, translator_only):
+    def run_file(source, results, *, job_id, progress, translator_only, source_language, target_language):
         assert translator_only is True
         folder = results / job_id
         folder.mkdir()

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Three-arm live comparison. Run PYTHONPATH=src:. python eval/run_eval.py.
+"""Live translation comparison. Run PYTHONPATH=src:. python eval/run_eval.py.
 
-All available arms use the same reviewer and seeded-value oracle. Baseline latency
-and historical usage are unknown, never reported as zero. Missing baselines are explicit.
+The three local translation strategies, customer baseline and production pipeline use the
+same reviewer and seeded-value oracle. Baseline latency and historical usage are unknown,
+never reported as zero. Missing baselines are explicit.
 """
 
 import argparse
@@ -17,14 +18,16 @@ import requests
 
 from activities.check import review_documents
 from scripts.translator_spike import translate_file
-from services import extraction, glossary, normalize, storage
+from services import contextual_translation, extraction, glossary, local_translation, normalize, storage
 from services.config import credential, required
 
 ROOT = Path(__file__).resolve().parents[1]
 ISSUE_TYPES = ["omission", "addition", "meaning_shift", "terminology", "number", "tone", "formatting"]
 COLUMNS = [
     "document", "arm", "status", "score", "pipelineScore", "passAMissesVsExpected",
-    "latencySeconds", "characters", "images", "tokens", "evaluationTokens", *ISSUE_TYPES,
+    "latencySeconds", "characters", "images", "tokens", "model", "inputTokens",
+    "outputTokens", "modelLatencySeconds", "translatorCharactersSubmitted",
+    "translatorCharactersCharged", "evaluationTokens", *ISSUE_TYPES,
 ]
 
 
@@ -69,7 +72,7 @@ def main():
     parser.add_argument("--baseline", type=Path, default=ROOT / "eval/baseline")
     args = parser.parse_args()
     expected = json.loads((ROOT / "samples/expected.json").read_text())
-    standard = (ROOT / "src/glossaries/aon-standard.tsv").read_text()
+    standard = (ROOT / "src/glossaries/insurance-standard.tsv").read_text()
     with args.output.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, COLUMNS)
         writer.writeheader()
@@ -85,13 +88,41 @@ def main():
                 source_text,
             )
             prepared = {**extracted, "language": meta["sourceLanguage"], "terms": terms, "usage": []}
-            for arm in ("A", "B", "C"):
+            for arm in ("azure_translator", "direct_gpt", "translator_refine",
+                        "customer_baseline", "production_pipeline"):
                 row = {"document": filename, "arm": arm}
                 started = time.monotonic()
                 signals = {}
-                if arm == "A":
+                model_usage = {}
+                job_id = uuid.uuid4().hex
+                if arm == "azure_translator":
                     result, signals = translate_file(path, meta["sourceLanguage"], use_glossary=False)
-                elif arm == "B":
+                    translated = extraction.extract(result, filename)
+                elif arm == "direct_gpt":
+                    translated, model_usage = contextual_translation.translate(
+                        prepared["segments"], meta["sourceLanguage"], "en", terms, job_id,
+                        strategy="direct_gpt",
+                    )
+                elif arm == "translator_refine":
+                    baseline, translator_usage = local_translation.translate_segments(
+                        prepared["segments"], meta["sourceLanguage"], "en", job_id,
+                    )
+                    refinement_input = [
+                        {**source, "translatorOutput": target["text"]}
+                        for source, target in zip(prepared["segments"], baseline["segments"], strict=True)
+                    ]
+                    translated, model_usage = contextual_translation.translate(
+                        refinement_input, meta["sourceLanguage"], "en", terms, job_id,
+                        strategy="translator_refine",
+                    )
+                    model_usage["translator"] = translator_usage
+                    signals = {
+                        "characters": translator_usage["charactersCharged"]
+                        if translator_usage["charactersCharged"] is not None
+                        else translator_usage["charactersSubmitted"],
+                        "images": translator_usage["imagesTranslated"],
+                    }
+                elif arm == "customer_baseline":
                     baseline = args.baseline / filename
                     if not baseline.exists():
                         writer.writerow({**row, "status": "baseline_missing"})
@@ -106,8 +137,9 @@ def main():
                     signals = {"characters": status["chars"], "images": status["images"],
                                "tokens": status["tokens"]}
                     row["pipelineScore"] = status["score"]
-                latency = time.monotonic() - started if arm != "B" else None
-                translated = extraction.extract(result, filename)
+                latency = time.monotonic() - started if arm != "customer_baseline" else None
+                if arm in {"customer_baseline", "production_pipeline"}:
+                    translated = extraction.extract(result, filename)
                 report = review_documents({
                     "jobId": uuid.uuid4().hex, "fileName": filename, "targetLanguage": "en",
                 }, prepared, translated)
@@ -117,6 +149,16 @@ def main():
                     "passAMissesVsExpected": oracle_misses(meta, translated),
                     "latencySeconds": latency, "characters": signals.get("characters"),
                     "images": signals.get("images"), "tokens": signals.get("tokens"),
+                    "model": model_usage.get("model"),
+                    "inputTokens": model_usage.get("inputTokens"),
+                    "outputTokens": model_usage.get("outputTokens"),
+                    "modelLatencySeconds": model_usage.get("durationSeconds"),
+                    "translatorCharactersSubmitted": model_usage.get("translator", {}).get(
+                        "charactersSubmitted",
+                    ),
+                    "translatorCharactersCharged": model_usage.get("translator", {}).get(
+                        "charactersCharged",
+                    ),
                     "evaluationTokens": report["costSignals"]["tokens"],
                     **{kind: issue_counts[kind] for kind in ISSUE_TYPES},
                 })

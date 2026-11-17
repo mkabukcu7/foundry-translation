@@ -28,6 +28,7 @@ def review_documents(job, prepared, translated):
             grouped = Counter((f["item"], f["type"], f["side"]) for f in local_findings)
             checked = foundry_agents.review_pair({
                 "location": pair["location"], "part": i + 1,
+                "sourceLanguage": prepared["language"], "targetLanguage": job["targetLanguage"],
                 "source": source_part, "target": target_part,
                 "glossary": local_terms,
                 "passA": [{"item": item, "type": kind, "side": side, "count": count, "match": "unmatched"}

@@ -12,7 +12,7 @@ def prepare_terms(extracted, source_language, target_language, job_id):
     language = source_language or extracted["language"] or Translator().detect(text, job_id)
     glossary.locale_for(language)
     terms, usage = [], []
-    standard = (Path(__file__).resolve().parents[1] / "glossaries" / "aon-standard.tsv").read_text()
+    standard = (Path(__file__).resolve().parents[1] / "glossaries" / "insurance-standard.tsv").read_text()
     for chunk in chunks(text):
         result, cost = foundry_agents.invoke("term-guard", {
             "text": chunk, "standardGlossary": standard, "sourceLanguage": language,

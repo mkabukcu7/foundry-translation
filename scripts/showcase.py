@@ -3,6 +3,7 @@
 
 import json
 import logging
+import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +17,8 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from activities.precheck import validate_document
 from scripts.local_demo import run_file
-from services.local_translation import native_pptx_only
+from services.config import ReconstructionError, ReviewTimeoutError
+from services.local_translation import validate_pptx
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "showcase"
@@ -26,11 +28,13 @@ SAMPLES = {
     "pdf": ("Digital claim", "Native PDF / text extraction", "local_claim_it.pdf"),
     "slides": ("Claim presentation", "Native-text PPTX / glossary", "local_claim_it.pptx"),
 }
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
 JOB_ID = re.compile(r"[0-9a-f]{32}")
 logger = logging.getLogger("showcase")
 
 
 def create_app(results=RESULTS, *, translator_only=False):
+    skip_review = os.getenv("SHOWCASE_SKIP_REVIEW", "").lower() == "true"
     results = Path(results)
     port = 8766 if translator_only else 8765
     hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
@@ -70,7 +74,7 @@ def create_app(results=RESULTS, *, translator_only=False):
             raise HTTPException(404, "Unknown job")
         return results / job_id
 
-    def execute(job_id, data, filename):
+    def execute(job_id, data, filename, strategy, source_language, target_language):
         def progress(stage):
             with lock:
                 jobs[job_id]["stage"] = stage
@@ -78,8 +82,11 @@ def create_app(results=RESULTS, *, translator_only=False):
             with TemporaryDirectory(prefix="translation-showcase-") as temp:
                 source = Path(temp) / filename
                 source.write_bytes(data)
-                options = {"translator_only": True} if translator_only else {}
-                report = run_file(source, results, job_id=job_id, progress=progress, **options)
+                options = {"translator_only": True} if translator_only else {"strategy": strategy}
+                if skip_review and not translator_only:
+                    options["skip_review"] = True
+                report = run_file(source, results, source_language=source_language, target_language=target_language,
+                                  job_id=job_id, progress=progress, **options)
             with lock:
                 jobs[job_id].update(state="finished", stage="save", status=report["status"])
         except Exception as error:
@@ -87,14 +94,23 @@ def create_app(results=RESULTS, *, translator_only=False):
             with lock:
                 failed_stage = jobs[job_id]["stage"]
                 jobs[job_id].update(state="failed", error=(
+                    str(error) if isinstance(error, (ReviewTimeoutError, ReconstructionError)) else
+                    "Translation completed, but document reconstruction failed. "
+                    "Download the translated TXT and inspect document layout." if failed_stage == "reconstruct" else
                     f"Job failed during {failed_stage} ({type(error).__name__}). "
                     "Check Azure login, service access and configuration before retrying."
                 ))
+                if (results / job_id / "translated.txt").is_file():
+                    jobs[job_id]["partialOutput"] = "translated.txt"
             logger.error("jobId=%s stage=%s errorType=%s", job_id, failed_stage, type(error).__name__)
 
     @app.get("/")
     def index():
         return FileResponse(WEB / ("baseline.html" if translator_only else "index.html"), media_type="text/html")
+
+    @app.get("/api/config")
+    def configuration():
+        return {"reviewEnabled": not (skip_review or translator_only)}
 
     @app.get("/app.js")
     def javascript():
@@ -124,8 +140,21 @@ def create_app(results=RESULTS, *, translator_only=False):
 
     @app.post("/api/jobs", status_code=202)
     async def submit(request: Request):
+        source_language = request.query_params.get("sourceLanguage", "it")
+        target_language = request.query_params.get("targetLanguage", "en")
+        if source_language not in ("it", "es", "en") or target_language not in ("it", "es", "en"):
+            raise HTTPException(400, "Source and target languages must be Italian (it), Spanish (es) or English (en)")
+        if source_language == target_language:
+            raise HTTPException(400, "Source and target languages must differ")
+        strategy = request.query_params.get("strategy", "translator")
+        if strategy not in ("translator", "direct_gpt", "translator_refine"):
+            raise HTTPException(400, "Unknown translation strategy")
+        if translator_only and strategy != "translator":
+            raise HTTPException(400, "Translator-only mode supports only Azure Translator")
         sample = request.query_params.get("sample")
         if sample:
+            if source_language != "it":
+                raise HTTPException(400, "Built-in samples are Italian; select Italian or upload a Spanish file")
             if sample not in SAMPLES:
                 raise HTTPException(400, "Unknown sample")
             filename = SAMPLES[sample][2]
@@ -138,31 +167,34 @@ def create_app(results=RESULTS, *, translator_only=False):
             if (not filename or len(filename) > 160
                     or any(c in filename for c in '/\\<>:"|?*')
                     or any(ord(c) < 32 for c in filename)):
-                raise HTTPException(400, "Use a PDF or PPTX filename without directory components")
-            if Path(filename).suffix.lower() not in (".pdf", ".pptx"):
-                raise HTTPException(400, "Only PDF and PPTX documents are supported")
-            limit = (10 if filename.lower().endswith(".pptx") else 40) * 1024 * 1024
+                raise HTTPException(400, "Use a document filename without directory components")
+            suffix = Path(filename).suffix.lower()
+            if suffix not in (".pdf", ".pptx", ".docx", ".xlsx", *IMAGE_EXTENSIONS):
+                raise HTTPException(400, "Use a PDF, PPTX, DOCX, XLSX, JPEG, PNG, BMP or TIFF image")
+            limit = (10 if suffix in (".pptx", ".docx", ".xlsx") else 40) * 1024 * 1024
             body = bytearray()
             async for chunk in request.stream():
                 if len(body) + len(chunk) > limit:
-                    raise HTTPException(413, "PDF limit is 40 MiB; PPTX limit is 10 MiB")
+                    raise HTTPException(413, "PDF/image limit is 40 MiB; PPTX/DOCX/XLSX limit is 10 MiB")
                 body.extend(chunk)
             data = bytes(body)
         try:
             validate_document(data, filename)
             if filename.lower().endswith(".pptx"):
-                native_pptx_only(data)
+                validate_pptx(data, allow_images=True)
         except Exception as error:
             # Validation messages are fixed by our validators; avoid arbitrary parser content.
             logger.warning("jobId=pending validationError=%s", type(error).__name__)
-            raise HTTPException(400, "Invalid or unsupported document. Use an unsecured PDF or native-text "
-                                "PPTX without images, within the displayed size limits.") from None
+            raise HTTPException(400, "Invalid or unsupported file. Use an unsecured PDF, supported image, "
+                                "DOCX, XLSX or PPTX within the displayed size limits. Macros are unsupported. "
+                                "DOCX tracked changes and "
+                                "dynamic fields must be converted to plain text; PPTX charts are unsupported.") from None
         job_id = uuid4().hex
         with lock:
             if any(job["state"] == "running" for job in jobs.values()):
                 raise HTTPException(409, "A live demo is already running. Wait for it to finish.")
             jobs[job_id] = {"jobId": job_id, "state": "running", "stage": "validate"}
-        executor.submit(execute, job_id, data, filename)
+        executor.submit(execute, job_id, data, filename, strategy, source_language, target_language)
         return {"jobId": job_id}
 
     @app.get("/api/jobs/{job_id}")
@@ -177,12 +209,15 @@ def create_app(results=RESULTS, *, translator_only=False):
         report = json.loads((destination / "report.json").read_text(encoding="utf-8"))
         preview = destination / "showcase.json"
         detail = json.loads(preview.read_text(encoding="utf-8")) if preview.is_file() else None
-        output = "translated.pptx" if (destination / "translated.pptx").is_file() else "translated.txt"
+        output = report.get("outputFile") or (
+            "translated.pptx" if (destination / "translated.pptx").is_file() else "translated.txt")
         return {"jobId": job_id, "state": "finished", "report": report, "preview": detail, "output": output}
 
     @app.get("/api/jobs/{job_id}/download/{name}")
     def download(job_id: str, name: str):
-        if name not in ("report.json", "translated.txt", "translated.pptx"):
+        if name not in ("report.json", "translated.txt", "translated.pptx", "translated.docx", "translated.xlsx", "translated.pdf",
+                        "translated.jpg", "translated.jpeg", "translated.png", "translated.bmp",
+                        "translated.tif", "translated.tiff"):
             raise HTTPException(404, "Unknown output")
         path = folder(job_id) / name
         if not path.is_file():

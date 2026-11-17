@@ -27,6 +27,8 @@ function choose(value) {
 }
 function setBusy(value) {
   busy = value; $("run").disabled = value || !selection; $("upload").disabled = value;
+  $("source-language").disabled = value;
+  $("target-language").disabled = value;
   $("run").textContent = value ? "Translating..." : "Translate only";
   document.querySelectorAll(".sample, .history button").forEach(b => { b.disabled = value || b.dataset.unavailable === "true"; });
 }
@@ -35,6 +37,8 @@ function render(data) {
   $("empty").hidden = true; $("result").hidden = false;
   $("job-id").textContent = `jobId / ${data.jobId}\nInput: ${r.sourceFile || "not recorded"} / SHA-256: ${r.sourceSha256 || "not recorded"}`;
   $("source-text").textContent = data.preview?.sourceText || "Preview not available.";
+  $("source-heading").textContent = `${({it:"Italian", es:"Spanish", en:"English"})[r.sourceLanguage] || "Original"} source`;
+  $("target-heading").textContent = `${({it:"Italian", es:"Spanish", en:"English"})[r.targetLanguage] || "Target"} translation`;
   $("target-text").textContent = data.preview?.translatedText || "Preview not available.";
   const seconds = Object.values(cost.durationsSeconds).reduce((a,b) => a+b, 0);
   const values = [[cost.charactersCharged ?? "Unknown", "Characters charged"], [cost.ocrPages, "OCR pages"], [0, "Agent tokens (no calls)"], [`${seconds.toFixed(1)}s`, "Workflow time"]];
@@ -49,16 +53,22 @@ function render(data) {
 async function openJob(id) {
   const data = await api(`/api/jobs/${id}`);
   const finished = data.state === "finished";
-  const stages = ["validate", "extract", "translate", "save"];
+  const stages = ["validate", "extract", "translate", "reconstruct", "save"];
   document.querySelectorAll("#stages li").forEach(n => {
     n.classList.toggle("done", finished || stages.indexOf(n.dataset.stage) < stages.indexOf(data.stage));
     n.classList.toggle("active", !finished && n.dataset.stage === data.stage);
   });
   $("progress-note").textContent = `jobId / ${id} \u00b7 No agents called. Closing this page does not cancel in-flight calls.`;
   if (data.state === "failed") {
-    showError(`${data.error} / jobId ${id}`); $("workflow-title").textContent = "Workflow stopped"; $("run-state").textContent = "FAILED"; return true;
+    showError(`${data.error} / jobId ${id}`);
+    if (data.partialOutput === "translated.txt") {
+      const link = el("a", "Download translated text (not reviewed)");
+      link.href = `/api/jobs/${id}/download/translated.txt`;
+      $("error").append(el("br"), link);
+    }
+    $("workflow-title").textContent = "Workflow stopped"; $("run-state").textContent = "FAILED"; return true;
   }
-  $("workflow-title").textContent = finished ? "Baseline workflow complete" : ({validate:"Validating", extract:"Extracting text / OCR", translate:"Translator is translating", save:"Saving local result"}[data.stage] || "Running");
+  $("workflow-title").textContent = finished ? "Baseline workflow complete" : ({validate:"Validating", extract:"Extracting text / OCR", translate:"Translator is translating", reconstruct:"Rebuilding translated document", save:"Saving local result"}[data.stage] || "Running");
   $("run-state").textContent = finished ? "FINISHED" : "LIVE";
   if (finished) render(data);
   return finished;
@@ -77,7 +87,9 @@ $("run").addEventListener("click", async () => {
   if (busy || !selection) return;
   const input = selection; setBusy(true); $("error").hidden = true; $("result").hidden = true; $("empty").hidden = false;
   try {
-    const query = input.sample ? `sample=${encodeURIComponent(input.sample)}` : `filename=${encodeURIComponent(input.file.name)}`;
+    if ($("source-language").value === $("target-language").value)
+      throw new Error("Choose different source and target languages.");
+    const query = `${input.sample ? `sample=${encodeURIComponent(input.sample)}` : `filename=${encodeURIComponent(input.file.name)}`}&sourceLanguage=${encodeURIComponent($("source-language").value)}&targetLanguage=${encodeURIComponent($("target-language").value)}`;
     const job = await api(`/api/jobs?${query}`, {method:"POST", headers:{"X-Showcase-Request":"1","Content-Type":"application/octet-stream"}, body:input.file || null});
     while (!await openJob(job.jobId)) await new Promise(resolve => setTimeout(resolve,1200));
     await history();

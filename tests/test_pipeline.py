@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import jsonschema
 import pytest
+from PIL import Image
 from pptx import Presentation
 from pypdf import PdfReader, PdfWriter
 from pypdf.constants import UserAccessPermissions
@@ -46,6 +47,23 @@ def test_pdf_rejects_encrypted_and_copy_restricted():
     secured = output.getvalue()
     with pytest.raises(ValueError, match="Encrypted"):
         validate_document(secured, "x.pdf")
+
+
+def test_image_validation_accepts_supported_formats_and_rejects_mismatches():
+    for extension, image_format in (("jpg", "JPEG"), ("png", "PNG"), ("bmp", "BMP"), ("tiff", "TIFF")):
+        output = io.BytesIO()
+        Image.new("RGB", (100, 100), "white").save(output, format=image_format)
+        validate_document(output.getvalue(), f"marketing.{extension}")
+    jpeg = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(jpeg, format="JPEG")
+    with pytest.raises(ValueError, match="does not match"):
+        validate_document(jpeg.getvalue(), "marketing.png")
+    with pytest.raises(ValueError, match="Invalid or unsupported image"):
+        validate_document(b"not an image", "marketing.png")
+    with pytest.raises(ValueError, match="dimensions"):
+        output = io.BytesIO()
+        Image.new("RGB", (40, 100), "white").save(output, format="PNG")
+        validate_document(output.getvalue(), "small.png")
 
 
 def test_watermarks_every_page_and_slide():

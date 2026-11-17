@@ -6,28 +6,21 @@ from urllib.parse import urlparse
 
 import requests
 from pptx import Presentation
-from pptx.enum.shapes import PP_PLACEHOLDER
 
 from services.config import ExternalServiceError, credential, required
-from services.pptx_extract import all_shapes
+from services.pptx_extract import all_shapes, has_images
 
 PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
-def native_pptx_only(data: bytes):
+def validate_pptx(data: bytes, *, allow_images=False):
     presentation = Presentation(io.BytesIO(data))
+    if not allow_images and has_images(data):
+        raise ValueError("Synchronous document translation supports native-text PPTX only")
     for slide in presentation.slides:
-        layout = slide.slide_layout
-        parts = (slide.part, layout.part, layout.slide_master.part)
-        if any(part._element.xpath(".//a:blip") for part in parts):
-            raise ValueError("Storage-free PPTX mode supports native text only; use a scanned PDF for the OCR demo")
-        shapes = (slide.shapes, layout.shapes, layout.slide_master.shapes)
+        shapes = (slide.shapes, slide.slide_layout.shapes, slide.slide_layout.slide_master.shapes)
         if any(shape.has_chart for group in shapes for shape in all_shapes(group)):
             raise ValueError("Storage-free PPTX mode does not support charts; chart content is not reviewed")
-        if any(shape.shape_type == 13 or (
-            shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.PICTURE
-        ) for group in shapes for shape in all_shapes(group)):
-            raise ValueError("Storage-free PPTX mode supports native text only; use a scanned PDF for the OCR demo")
 
 
 def request(path, job_id, **kwargs):
@@ -53,7 +46,7 @@ def translate_pptx(data, glossary_data, source_language, target_language, job_id
         raise ValueError("Synchronous document translation supports documents up to 10 MB")
     if len(glossary_data) > 1024 * 1024:
         raise ValueError("Synchronous glossary exceeds 1 MB")
-    native_pptx_only(data)
+    validate_pptx(data)
     files = {"document": ("document.pptx", data, PPTX_TYPE)}
     if glossary_data:
         files["glossary"] = ("glossary.tsv", glossary_data, "text/tab-separated-values")
@@ -62,7 +55,7 @@ def translate_pptx(data, glossary_data, source_language, target_language, job_id
     }, files=files)
     if not response.content.startswith(b"PK"):
         raise ExternalServiceError(f"Translator did not return a PPTX; jobId={job_id}")
-    native_pptx_only(response.content)
+    validate_pptx(response.content)
     return response.content, {"mode": "synchronous-document", "glossaryApplied": bool(glossary_data),
                               "charactersCharged": None, "imagesTranslated": 0}
 

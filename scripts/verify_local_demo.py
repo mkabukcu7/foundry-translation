@@ -7,6 +7,8 @@ import json
 import re
 from pathlib import Path
 
+from pypdf import PdfReader
+
 from services import pptx_extract
 
 
@@ -18,6 +20,8 @@ def verify(folder: Path):
         # Also prove that a saved, flagged presentation is still readable.
         from pptx import Presentation
         assert len(Presentation(io.BytesIO(presentation.read_bytes())).slides) == 1
+    elif (folder / "translated.pdf").exists():
+        text = "\n".join(page.extract_text() for page in PdfReader(folder / "translated.pdf").pages)
     else:
         text = (folder / "translated.txt").read_text(encoding="utf-8")
     for expected in ("POL-2024-558812", "SIN-2025-004471", "Giulia Rossetti"):

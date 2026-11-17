@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory)][string]$InputFile,
     [string]$SourceLanguage = 'it',
-    [string]$TargetLanguage = 'en'
+    [string]$TargetLanguage = 'en',
+    [ValidateSet('translator', 'direct_gpt', 'translator_refine')]
+    [string]$Strategy = 'translator'
 )
 $ErrorActionPreference = 'Stop'
 Get-Content (Join-Path $PSScriptRoot '..\.env') | ForEach-Object {
@@ -16,5 +18,5 @@ if (Test-Path (Join-Path $PSScriptRoot '..\.agent-versions.env')) {
 if (-not $env:PYTHON_EXECUTABLE) { throw 'Set PYTHON_EXECUTABLE in .env to an installed Python environment' }
 $env:PYTHONPATH = Join-Path $PSScriptRoot '..\src'
 & $env:PYTHON_EXECUTABLE (Join-Path $PSScriptRoot 'local_demo.py') $InputFile `
-    --source-language $SourceLanguage --target-language $TargetLanguage
+    --source-language $SourceLanguage --target-language $TargetLanguage --strategy $Strategy
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

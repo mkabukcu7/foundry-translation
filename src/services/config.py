@@ -16,6 +16,21 @@ class ExternalServiceError(RuntimeError):
     """A controlled upstream error message containing status codes, never response bodies."""
 
 
+class ReconstructionError(ValueError):
+    """A fixed, safe-to-display document reconstruction failure."""
+
+
+class ReviewTimeoutError(ExternalServiceError):
+    """A safe-to-display timeout identifying only the reviewer and configured limit."""
+
+    def __init__(self, reviewer: str, seconds: int):
+        super().__init__(
+            f"Reviewer {reviewer} timed out (configured request timeout: {seconds}s). "
+            "Translation completed, but quality review is incomplete. "
+            "Retry later or adjust CHECKER_TIMEOUT_SECONDS; no automatic retry was made."
+        )
+
+
 def required(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:

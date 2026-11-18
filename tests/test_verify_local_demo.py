@@ -43,3 +43,21 @@ def test_verify_requires_agreement_for_secondary_checker(tmp_path):
     create_output(folder, secondary=True)
     with pytest.raises(AssertionError, match="Independent checker results missing"):
         verify(folder)
+
+
+@pytest.mark.parametrize("coverage", ["water\ndamage", "water   damage", "water\tdamage"])
+def test_verify_accepts_wrapped_coverage_wording(tmp_path, coverage):
+    folder = tmp_path / "wrapped"
+    create_output(folder)
+    path = folder / "translated.txt"
+    path.write_text(path.read_text(encoding="utf-8").replace("water damage", coverage), encoding="utf-8")
+    verify(folder)
+
+
+def test_verify_still_rejects_missing_coverage_wording(tmp_path):
+    folder = tmp_path / "missing"
+    create_output(folder)
+    path = folder / "translated.txt"
+    path.write_text(path.read_text(encoding="utf-8").replace("water damage", "storm damage"), encoding="utf-8")
+    with pytest.raises(AssertionError, match="Expected English translation missing"):
+        verify(folder)

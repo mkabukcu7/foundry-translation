@@ -25,7 +25,7 @@ def translate_file(path, language, target="en", use_glossary=True, timeout=1800)
     storage.put("source", source_path, path.read_bytes())
     glossary_url = None
     if use_glossary:
-        standard = (ROOT / "src/glossaries/aon-standard.tsv").read_text()
+        standard = (ROOT / "src/glossaries/insurance-standard.tsv").read_text()
         # The spike tests every approved row; the production prepare activity filters to source text.
         rows = standard.splitlines()
         header = rows[0].split("\t")

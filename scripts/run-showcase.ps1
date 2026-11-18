@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-param([switch]$TranslatorOnly)
+param([switch]$TranslatorOnly, [switch]$SkipReview)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 Get-Content .env | ForEach-Object {
@@ -11,6 +11,7 @@ if (Test-Path .agent-versions.env) {
     }
 }
 if (-not $env:PYTHON_EXECUTABLE) { throw 'Set PYTHON_EXECUTABLE in .env to an installed Python environment' }
+if ($SkipReview) { $env:SHOWCASE_SKIP_REVIEW = 'true' }
 $env:PYTHONPATH = "$(Get-Location);$(Join-Path (Get-Location) 'src')"
 $port = if ($TranslatorOnly) { 8766 } else { 8765 }
 $app = if ($TranslatorOnly) { 'scripts.showcase:baseline_app' } else { 'scripts.showcase:app' }

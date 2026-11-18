@@ -16,6 +16,45 @@ class ExternalServiceError(RuntimeError):
     """A controlled upstream error message containing status codes, never response bodies."""
 
 
+class ReconstructionError(ValueError):
+    """A fixed, safe-to-display document reconstruction failure."""
+
+
+class ReviewTimeoutError(ExternalServiceError):
+    """A safe-to-display timeout identifying only the reviewer and configured limit."""
+
+    def __init__(self, reviewer: str, seconds: int):
+        super().__init__(
+            f"Reviewer {reviewer} timed out (configured request timeout: {seconds}s). "
+            "Translation completed, but quality review is incomplete. "
+            "Retry later or adjust CHECKER_TIMEOUT_SECONDS; no automatic retry was made."
+        )
+
+
+class ReviewConnectionError(ExternalServiceError):
+    def __init__(self, reviewer: str):
+        super().__init__(
+            f"Connection to reviewer {reviewer} failed. Quality review is incomplete."
+        )
+
+
+class ReviewRateLimitError(ExternalServiceError):
+    def __init__(self, reviewer: str):
+        super().__init__(
+            f"Reviewer {reviewer} was rate limited (HTTP 429). Quality review is incomplete. "
+            "Wait before retrying; if it persists, check the reviewer's capacity or reduce review concurrency."
+        )
+
+
+class ReviewOutputError(ExternalServiceError):
+    def __init__(self, reviewer: str, attempt_usage: dict | None = None):
+        self.attempt_usage = attempt_usage
+        super().__init__(
+            f"Reviewer {reviewer} returned an invalid review response. "
+            "Translation completed, but quality review is incomplete."
+        )
+
+
 def required(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:

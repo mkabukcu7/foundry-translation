@@ -1,19 +1,14 @@
 # SPDX-License-Identifier: MIT
 import os
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 
 from services import alignment, extraction, foundry_agents, glossary, normalize, scoring, storage
 from services.chunking import chunks
 
 
-def review_documents(job, prepared, translated):
-    source_locale = os.getenv("SOURCE_LOCALE") or glossary.locale_for(prepared["language"])
-    target_locale = os.getenv("TARGET_LOCALE") or glossary.locale_for(job["targetLanguage"])
-    findings = normalize.compare(
-        prepared["segments"], translated["segments"], prepared["terms"], source_locale, target_locale,
-    )
-    pairs = alignment.align(prepared["segments"], translated["segments"], job["fileName"].endswith(".pptx"))
-    reviews, usage, agreements = [], [], []
+def _review_inputs(job, prepared, pairs, findings):
     for pair in pairs:
         # Corresponding subdivisions keep each call bounded while retaining both sides.
         source_chunks = chunks(pair["source"])
@@ -26,23 +21,48 @@ def review_documents(job, prepared, translated):
             local_findings = [f for f in findings if f["match"] == "unmatched"
                               and (f["item"] in source_part or f["item"] in target_part)]
             grouped = Counter((f["item"], f["type"], f["side"]) for f in local_findings)
-            checked = foundry_agents.review_pair({
+            yield {
                 "location": pair["location"], "part": i + 1,
+                "sourceLanguage": prepared["language"], "targetLanguage": job["targetLanguage"],
                 "source": source_part, "target": target_part,
                 "glossary": local_terms,
                 "passA": [{"item": item, "type": kind, "side": side, "count": count, "match": "unmatched"}
                           for (item, kind, side), count in grouped.items()],
-            }, job["jobId"])
-            for review, cost in checked:
-                reviews.append(review)
-                usage.append(cost)
-            if len(checked) == 2:
-                consensus = foundry_agents.agreement(checked[0][0], checked[1][0])
-                consensus["decisionAgreement"] = (
-                    scoring.score([], [checked[0][0]])["decision"]
-                    == scoring.score([], [checked[1][0]])["decision"]
-                )
-                agreements.append({"location": pair["location"], "part": i + 1, **consensus})
+            }
+
+
+def _review_chunks(inputs, job_id, parallel_chunks):
+    def review(data):
+        return data, foundry_agents.review_pair(data, job_id)
+
+    if parallel_chunks == 1:
+        yield from map(review, inputs)
+        return
+    with ThreadPoolExecutor(max_workers=parallel_chunks) as pool:
+        while batch := list(islice(inputs, parallel_chunks)):
+            yield from pool.map(review, batch)
+
+
+def review_documents(job, prepared, translated):
+    source_locale = os.getenv("SOURCE_LOCALE") or glossary.locale_for(prepared["language"])
+    target_locale = os.getenv("TARGET_LOCALE") or glossary.locale_for(job["targetLanguage"])
+    findings = normalize.compare(
+        prepared["segments"], translated["segments"], prepared["terms"], source_locale, target_locale,
+    )
+    pairs = alignment.align(prepared["segments"], translated["segments"], job["fileName"].endswith(".pptx"))
+    inputs = _review_inputs(job, prepared, pairs, findings)
+    reviews, usage, agreements = [], [], []
+    for data, checked in _review_chunks(inputs, job["jobId"], job.get("parallelReviewChunks", 1)):
+        for review, cost in checked:
+            reviews.append(review)
+            usage.append(cost)
+        if len(checked) == 2:
+            consensus = foundry_agents.agreement(checked[0][0], checked[1][0])
+            consensus["decisionAgreement"] = (
+                scoring.score([], [checked[0][0]])["decision"]
+                == scoring.score([], [checked[1][0]])["decision"]
+            )
+            agreements.append({"location": data["location"], "part": data["part"], **consensus})
     result = scoring.score(findings, reviews)
     if any(a["disagreement"] or not a["decisionAgreement"] for a in agreements):
         result["decision"] = "flagged"

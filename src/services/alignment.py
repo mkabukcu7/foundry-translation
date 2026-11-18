@@ -6,9 +6,15 @@ from difflib import SequenceMatcher
 
 def align(source: list[dict], target: list[dict], is_pptx=False) -> list[dict]:
     if is_pptx:
-        count = max(len(source), len(target))
-        return [{"location": f"slide:{i + 1}", "source": source[i]["text"] if i < len(source) else "",
-                 "target": target[i]["text"] if i < len(target) else ""} for i in range(count)]
+        source_text, target_text = {}, {}
+        for segments, index in ((source, source_text), (target, target_text)):
+            for segment in segments:
+                index.setdefault(segment["location"], []).append(segment["text"])
+        return [
+            {"location": location, "source": "\n".join(source_text.get(location, [])),
+             "target": "\n".join(target_text.get(location, []))}
+            for location in dict.fromkeys([*source_text, *target_text])
+        ]
     # Anchor role sequences; aggregate insertions/deletions so reflow is not mistaken for page loss.
     matcher = SequenceMatcher(a=[s["role"] for s in source], b=[s["role"] for s in target], autojunk=False)
     pairs = []

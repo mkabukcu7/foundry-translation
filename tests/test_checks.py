@@ -7,6 +7,21 @@ from services import alignment, glossary, normalize, scoring
 from services.chunking import chunks
 
 
+def test_pptx_alignment_uses_locations_without_shifting_missing_paragraphs():
+    first = "slide:1/frame:0/paragraph:0"
+    missing = "slide:1/frame:1/paragraph:0"
+    following = "slide:2/frame:0/paragraph:0"
+    source = [{"text": text, "location": location} for location, text in
+              ((first, "Primo"), (missing, "Mancante"), (following, "Secondo"))]
+    target = [{"text": text, "location": location} for location, text in
+              ((first, "First"), (following, "Second"))]
+    assert alignment.align(source, target, is_pptx=True) == [
+        {"location": first, "source": "Primo", "target": "First"},
+        {"location": missing, "source": "Mancante", "target": ""},
+        {"location": following, "source": "Secondo", "target": "Second"},
+    ]
+
+
 def segments(text):
     return [{"text": text, "location": "paragraph:1", "role": "paragraph"}]
 

@@ -3,16 +3,17 @@ const $ = id => document.getElementById(id);
 let selection = null;
 let busy = false;
 let viewing = null;
-const stages = ["validate", "extract", "prepare", "translate", "check", "save"];
-const stageNames = {validate:"Validating document", extract:"Extracting text / OCR", prepare:"Term Guard is preparing terminology", translate:"Translator is translating", check:"Independent reviewers are checking", save:"Saving local results"};
+let reviewEnabled = true;
+const stages = ["validate", "extract", "prepare", "translate", "reconstruct", "check", "save"];
+const stageNames = {validate:"Validating document", extract:"Extracting text / OCR", prepare:"Selecting glossary terms", translate:"Running selected translation engine", reconstruct:"Rebuilding translated document", check:"Independent reviewers are checking", save:"Saving local results"};
 function el(tag, text, cls) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
   if (cls) node.className = cls;
   return node;
 }
-async function api(url, options) {
-  const response = await fetch(url, options);
+async function api(url, options, onReconnect) {
+  const response = onReconnect ? await fetchJobStatus(url, onReconnect) : await fetch(url, options);
   if (!response.ok) {
     let message = `Request failed (HTTP ${response.status})`;
     try { const body = await response.json(); if (typeof body.detail === "string") message = body.detail; } catch { /* Preserve HTTP status if the server response is not JSON. */ }
@@ -34,8 +35,14 @@ function setBusy(value) {
   busy = value;
   $("run").disabled = value || !selection;
   $("upload").disabled = value;
+  $("source-language").disabled = value;
+  $("target-language").disabled = value;
+  $("strategy").disabled = value;
+  $("reasoning-effort").disabled = value;
+  $("glossary-mode").disabled = value;
+  $("hybrid").disabled = value || !reviewEnabled;
   document.querySelectorAll(".sample, .history button").forEach(button => { button.disabled = value || button.dataset.unavailable === "true"; });
-  $("run").textContent = value ? "Workflow running..." : "Translate & review";
+  $("run").textContent = value ? "Workflow running..." : reviewEnabled ? "Translate & review" : "Translate (no review)";
 }
 function progress(stage, finished = false) {
   const index = stages.indexOf(stage);
@@ -64,32 +71,65 @@ function table(headers, values) {
 function render(data) {
   const r = data.report, preview = data.preview, cost = r.costSignals || {};
   const flagged = r.status !== "complete";
+  const unreviewed = r.status === "not_reviewed";
   $("empty").hidden = true; $("result").hidden = false;
-  $("verdict").textContent = flagged ? "Human review required" : "Checks passed";
-  $("quality-badge").textContent = flagged ? "NEEDS REVIEW" : "PASSED";
+  $("verdict").textContent = unreviewed ? "Translation complete - not reviewed" : flagged ? "Human review required" : "Checks passed";
+  $("quality-badge").textContent = unreviewed ? "NOT REVIEWED" : flagged ? "NEEDS REVIEW" : "PASSED";
   $("quality-badge").className = `badge ${flagged ? "review" : "good"}`;
-  $("verdict-note").textContent = flagged
+  $("verdict-note").textContent = unreviewed ? "Quality review was skipped. This translation is not approved." : flagged
     ? "The workflow completed. Its checks identified concerns or reviewer disagreement; this document is not approved."
     : "Configured checks passed. This is a demo result, not a guarantee of translation accuracy.";
   $("job-id").textContent = `jobId / ${data.jobId} / Input: ${r.sourceFile || "not recorded"} / SHA-256: ${r.sourceSha256 || "not recorded"}`;
+  const translation = r.translation || {};
+  const engine = translation.engineDetails || {};
+  const engineLabels = {
+    translator:"Azure Translator NMT", doc_llm:"Document Translator LLM",
+    gpt6_luna:"GPT-6 Luna", gpt6_1_terra:"GPT-6.1 Terra", gpt5_6_luna:"GPT-5.6 Luna baseline"
+  };
+  $("strategy-title").textContent = engineLabels[engine.engine] || "Engine not recorded";
+  $("strategy-details").textContent = [
+    engine.maturity,
+    engine.model && `model ${engine.model}`,
+    engine.deploymentName && `deployment ${engine.deploymentName}`,
+    engine.deploymentType,
+    engine.apiVersion && `API ${engine.apiVersion}`,
+    engine.reasoningEffort && `reasoning ${engine.reasoningEffort}`,
+    translation.durationSeconds != null && `${translation.durationSeconds.toFixed(2)} seconds`
+  ].filter(Boolean).join(" \u00b7 ") || "Engine metadata unavailable.";
+  $("fidelity-details").textContent = r.documentFidelity?.evaluated
+    ? "Document fidelity was evaluated separately."
+    : `Document fidelity not evaluated: ${(r.documentFidelity?.concerns || []).join(", ")}.`;
   const agreements = r.checkerAgreement || [];
   const matched = agreements.reduce((n, a) => n + a.matchedIssues, 0);
   const total = agreements.reduce((n, a) => n + a.totalIssues, 0);
   const metrics = [
-    [`${r.score}/100`, "Experimental workflow score"],
+    [unreviewed ? "Not reviewed" : `${r.score}/100`, "Experimental workflow score"],
     [total ? `${matched}/${total}` : "\u2014", total ? "Exact issue agreement" : "No issues to compare"],
     [cost.charactersCharged == null ? "Unknown" : cost.charactersCharged.toLocaleString(), "Characters charged"],
-    [cost.tokens == null ? "Unknown" : cost.tokens.toLocaleString(), "Total agent tokens"]
+    [translation.inputTokens?.toLocaleString() ?? "Not reported", "Translation input tokens"],
+    [translation.outputTokens?.toLocaleString() ?? "Not reported", "Translation output tokens"],
+    [cost.tokens == null ? "Unknown" : cost.tokens.toLocaleString(), "Total recorded tokens"],
+    [cost.estimatedCostUSD == null ? "Unknown" : `$${cost.estimatedCostUSD.toFixed(4)}`, "Estimated document cost"]
   ];
+  if (r.hybridRouting?.enabled) {
+    metrics.push(
+      [`${r.hybridRouting.escalatedChunks}/${r.hybridRouting.eligibleChunks}`, "Hybrid chunks escalated"],
+      [`${(r.hybridRouting.escalationRate * 100).toFixed(1)}%`, "Hybrid escalation rate"],
+      [r.hybridRouting.estimatedCostUSD == null ? "Unknown" : `$${r.hybridRouting.estimatedCostUSD.toFixed(4)}`, "Escalation cost"]
+    );
+  }
   $("metrics").replaceChildren(...metrics.map(([value, label]) => {
     const node = el("div", undefined, "metric"); node.append(el("strong", value), el("span", label)); return node;
   }));
   $("download").href = `/api/jobs/${data.jobId}/download/${data.output}`;
+  $("download-text").href = `/api/jobs/${data.jobId}/download/translated.txt`;
   $("report").href = `/api/jobs/${data.jobId}/download/report.json`;
   $("result-limitations").replaceChildren(...(r.limitations || []).map(text => el("li", text)));
   $("source-text").textContent = preview?.sourceText || "Text preview was not saved for this earlier CLI run.";
+  $("source-heading").textContent = `${({it:"Italian", es:"Spanish", en:"English"})[r.sourceLanguage] || "Original"} source`;
+  $("target-heading").textContent = `${({it:"Italian", es:"Spanish", en:"English"})[r.targetLanguage] || "Target"} translation`;
   $("target-text").textContent = preview?.translatedText || "Download the translation to inspect this earlier result.";
-  $("preview-note").textContent = "Text shown before any review watermark. PPTX layout is available in the download. Flagged downloads are marked for review.";
+  $("preview-note").textContent = "See limitations for reconstruction and layout differences. For PowerPoint, text from pictures is included only in the companion TXT. Document fidelity is not assessed.";
   rows("terms", (preview?.terms || []).map(t => [t.term, t.action.toUpperCase(), t.action === "keep" ? t.term : t.target, t.type]));
   $("terms-note").textContent = preview ? `${preview.terms.length} protected / mapped terms. ${r.translation?.glossaryApplied ? "Glossary submitted to Document Translation." : "Terms checked by reviewers; not applied by Translator Text."}` : "Term preview was not saved for this earlier CLI run. Preservation checks are available below.";
   $("reviewers").replaceChildren(...(r.passB || []).map((review, i) => {
@@ -112,24 +152,41 @@ function render(data) {
     return card;
   }));
   $("agreement").replaceChildren();
-  if (!agreements.length) $("agreement").append(el("p", "Secondary reviewer was not enabled for this run.", "fine"));
+  if (!agreements.length) $("agreement").append(el("p", unreviewed ? "Quality review was skipped for this run." : "Secondary reviewer was not enabled for this run.", "fine"));
   agreements.forEach(a => {
     $("agreement").append(el("p", `${a.location} / part ${a.part}: ${a.disagreement ? "issue disagreement" : "no issue disagreement"}; reviewer decisions ${a.decisionAgreement ? "agree" : "differ"}.`, "fine"));
     if (a.issues.length) $("agreement").append(table(["Issue evidence (exact-match key)", "Reviewers"], a.issues.map(i => [i.key.join(" / "), i.reviewers.join(", ")])));
   });
   rows("checks", (r.passA || []).map(f => [f.item, f.type, f.match, f.side]));
-  const calls = [...(r.prepareUsage || []), ...(r.versions || [])];
-  $("usage").replaceChildren(table(["Agent", "Deployment", "Input tokens", "Output tokens", "Seconds"], calls.map(u => [u.agent, u.model, u.inputTokens, u.outputTokens, u.durationSeconds?.toFixed(2)])));
+  const translationCalls = [
+    ...(translation.calls || []).map(u => ({...u, label: `Translation batch ${u.group}`})),
+    ...(translation.escalationUsage || []).flatMap((chunk, index) =>
+      (chunk.calls || []).map(u => ({...u, label: `Escalation ${index + 1}, batch ${u.group}`}))),
+  ];
+  const calls = [...(r.prepareUsage || []), ...translationCalls, ...(r.versions || [])];
+  $("usage").replaceChildren(table(["Call", "Deployment", "Input tokens", "Output tokens", "Seconds"], calls.map(u => [u.label || u.agent, u.model, u.inputTokens, u.outputTokens, u.durationSeconds?.toFixed(2)])));
   $("usage").append(table(["Step", "Seconds"], Object.entries(cost.durationsSeconds || {}).map(([k,v]) => [k, v.toFixed(2)])));
   $("usage").append(el("p", `OCR pages: ${cost.ocrPages ?? "unknown"} / Images translated: ${cost.imagesTranslated ?? "unknown"} / Charged characters: ${cost.charactersCharged ?? "unknown"}. No dollar estimate is inferred.`, "fine"));
 }
 async function openJob(id) {
   $("error").hidden = true;
-  const data = await api(`/api/jobs/${id}`);
+  const data = await api(`/api/jobs/${id}`, undefined, () => {
+    $("progress-note").textContent = `jobId / ${id} · Reconnecting to the local showcase. No new job was submitted.`;
+  });
   if (data.state === "failed") {
     $("workflow-title").textContent = "Workflow stopped";
     $("run-state").textContent = "FAILED";
     error(`${data.error} jobId / ${id}`);
+    if (data.partialDocument === "translated-unreviewed.pptx") {
+      const link = el("a", "Download PowerPoint draft (not reviewed)");
+      link.href = `/api/jobs/${id}/download/translated-unreviewed.pptx`;
+      $("error").append(el("br"), link);
+    }
+    if (data.partialOutput === "translated.txt") {
+      const link = el("a", "Download translated text (not reviewed)");
+      link.href = `/api/jobs/${id}/download/translated.txt`;
+      $("error").append(el("br"), link);
+    }
     return true;
   }
   if (data.state === "finished") {
@@ -145,7 +202,7 @@ async function history() {
   const jobs = await api("/api/jobs");
   $("history").replaceChildren(...jobs.map(job => {
     const button = el("button");
-    button.append(el("span", `${job.status === "complete" ? "Checks passed" : "Needs review"} \u00b7 ${job.score}/100`),
+    button.append(el("span", job.status === "not_reviewed" ? "Not reviewed" : `${job.status === "complete" ? "Checks passed" : "Needs review"} \u00b7 ${job.score}/100`),
       el("small", `${new Date(job.savedAt * 1000).toLocaleString()} / ${job.jobId.slice(0, 8)}`));
     button.disabled = busy;
     button.addEventListener("click", async () => {
@@ -169,11 +226,15 @@ $("run").addEventListener("click", async () => {
   setBusy(true);
   try {
     if (input.file) {
-      const max = input.file.name.toLowerCase().endsWith(".pptx") ? 10 : 40;
-      if (!/\.(pdf|pptx)$/i.test(input.file.name) || input.file.size > max * 1024 * 1024)
-        throw new Error("Choose a PDF up to 40 MiB or a native-text PPTX up to 10 MiB.");
+      const suffix = input.file.name.split(".").pop().toLowerCase();
+      const max = ["pptx", "docx", "xlsx"].includes(suffix) ? 10 : 40;
+      if (!/\.(pdf|pptx|docx|xlsx|jpe?g|png|bmp|tiff?)$/i.test(input.file.name) || input.file.size > max * 1024 * 1024)
+        throw new Error("Choose a PDF or supported image up to 40 MiB, or a PPTX/DOCX/XLSX up to 10 MiB.");
     }
-    const query = input.sample ? `sample=${encodeURIComponent(input.sample)}` : `filename=${encodeURIComponent(input.file.name)}`;
+    const strategy = $("strategy").value;
+    if ($("source-language").value === $("target-language").value)
+      throw new Error("Choose different source and target languages.");
+    const query = `${input.sample ? `sample=${encodeURIComponent(input.sample)}` : `filename=${encodeURIComponent(input.file.name)}`}&engine=${encodeURIComponent(strategy)}&sourceLanguage=${encodeURIComponent($("source-language").value)}&targetLanguage=${encodeURIComponent($("target-language").value)}&reasoningEffort=${encodeURIComponent($("reasoning-effort").value)}&glossaryMode=${encodeURIComponent($("glossary-mode").value)}&hybrid=${$("hybrid").checked}`;
     viewing = null;
     const job = await api(`/api/jobs?${query}`, {method:"POST", headers:{"X-Showcase-Request":"1", "Content-Type":"application/octet-stream"}, body:input.file || null});
     viewing = job.jobId;
@@ -190,6 +251,15 @@ $("run").addEventListener("click", async () => {
 });
 async function init() {
   try {
+    const config = await api("/api/config");
+    reviewEnabled = config.reviewEnabled;
+    if (!reviewEnabled) {
+      document.querySelector('#stages li[data-stage="check"]').hidden = true;
+      $("hybrid").checked = false;
+      $("workflow-title").textContent = "Manual review";
+      $("progress-note").textContent = "Translations are saved without automated review for you to inspect.";
+      setBusy(false);
+    }
     const samples = await api("/api/samples");
     $("samples").replaceChildren(...samples.map(sample => {
       const button = el("button", undefined, "sample"); button.dataset.id = sample.id;

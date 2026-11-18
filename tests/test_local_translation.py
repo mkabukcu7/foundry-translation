@@ -175,6 +175,42 @@ def test_hybrid_routing_retranslates_only_flagged_terminology_and_reviews_again(
     assert report["initialReview"]["issues"] == [issue]
 
 
+def test_direct_gpt_uses_pinned_agent_unless_engine_is_explicit(monkeypatch, tmp_path):
+    from scripts import local_demo
+
+    monkeypatch.setenv("TRANSLATION_AGENT_NAME", "contextual-translation-gpt")
+    source = tmp_path / "source.pdf"
+    source.write_bytes(pdf())
+    monkeypatch.setattr(local_demo.docintel_client, "extract", lambda *_args, **_kwargs: {
+        "segments": [{"text": "Claim POL-123", "page": 1, "bounds": [.1, .1, .8, .3]}],
+        "language": "it", "pageCount": 1,
+    })
+    models = []
+
+    def translate(segments, *_args, model, **_kwargs):
+        models.append(model)
+        usage = {"model": "agent-model", "agent": "contextual-translation-gpt", "version": "7"} \
+            if model is None else {"model": model}
+        return {"segments": [{**segments[0], "text": "Claim POL-123"}], "language": "en"}, usage
+
+    monkeypatch.setattr(local_demo.contextual_translation, "translate", translate)
+    pinned = run_file(
+        source, tmp_path / "output", strategy="direct_gpt", skip_review=True,
+    )
+    explicit = run_file(
+        source, tmp_path / "output", engine="gpt6_luna", skip_review=True,
+    )
+
+    assert models == [None, "gpt-6-luna"]
+    assert pinned["translation"]["engineDetails"]["model"] == "agent-model"
+    assert pinned["translation"]["engineDetails"]["engine"] == "foundry_agent"
+    assert pinned["translation"]["engineDetails"]["agent"] == "contextual-translation-gpt"
+    assert pinned["translation"]["engineDetails"]["agentVersion"] == "7"
+    assert pinned["translation"]["engineDetails"]["deploymentName"] is None
+    assert pinned["translation"]["estimatedCostUSD"] is None
+    assert "agent" not in explicit["translation"]["engineDetails"]
+
+
 @pytest.mark.parametrize("body", [[], [None], [{"translations": None}], [{"translations": [None]}],
                                    [{"translations": []}],
                                    [{"translations": [{"to": "it", "text": "wrong"}]}]])

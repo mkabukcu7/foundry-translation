@@ -73,6 +73,8 @@ def relevant_terms(data: str, source_language: str, target_language: str, text: 
     for term in candidates:
         terms = vector(term["term"])
         norm = sqrt(sum(count * count for count in terms.values()))
+        if not norm:
+            continue
         similarity = sum(count * document.get(word, 0) for word, count in terms.items()) / (norm * document_norm)
         if similarity > 0:
             ranked.append((similarity, term["term"], term))

@@ -13,16 +13,13 @@ from collections import Counter
 from pathlib import Path
 from zipfile import ZipFile
 
-import requests
-from azure.core.exceptions import AzureError
-from openai import APIError
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pypdf import PdfReader
 
 from scripts.local_demo import run_file
-from services import docx_document
-from services.config import ConfigurationError, ExternalServiceError, id_patterns
+from services import docx_document, xlsx_document
+from services.config import id_patterns
 from services.pptx_extract import all_shapes
 from services.translation_engines import ENGINES, REASONING_EFFORTS
 
@@ -61,7 +58,7 @@ def exact_values(source: str, target: str) -> dict:
         results[kind] = {
             "sourceCount": sum(source_counts.values()),
             "matchedCount": matched,
-            "exact": matched == sum(source_counts.values()),
+            "exact": source_counts == target_counts,
         }
     return results
 
@@ -71,8 +68,10 @@ def terminology_score(terms: list[dict], translated_text: str) -> float | None:
         return None
     correct = sum(
         1 for term in terms
-        if (term["term"] if term["action"] == "keep" else term["target"]).casefold()
-        in translated_text.casefold()
+        if re.search(
+            r"(?<!\w)" + re.escape(term["term"] if term["action"] == "keep" else term["target"]) + r"(?!\w)",
+            translated_text, re.IGNORECASE,
+        )
     )
     return correct / len(terms) * 100
 
@@ -118,18 +117,16 @@ def document_structure(path: Path) -> dict:
                 images=sum(name.startswith("word/media/") for name in archive.namelist()),
             )
     elif suffix == ".xlsx":
-        from openpyxl import load_workbook
-
-        workbook = load_workbook(path, data_only=False)
-        result.update(
-            sheets=len(workbook.worksheets),
-            paragraphs=sum(
-                isinstance(cell.value, str) and not cell.value.startswith("=")
-                for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row
-            ),
-            tables=sum(len(sheet.tables) for sheet in workbook.worksheets),
-            images=sum(len(sheet._images) for sheet in workbook.worksheets),
-        )
+        with ZipFile(path) as archive:
+            names = archive.namelist()
+            workbook = xlsx_document.parse(archive.read("xl/workbook.xml"))
+            namespace = {"s": xlsx_document.S[1:-1]}
+            result.update(
+                sheets=len(workbook.xpath("./s:sheets/s:sheet", namespaces=namespace)),
+                paragraphs=len(xlsx_document.extract(path.read_bytes())["segments"]),
+                tables=sum(name.startswith("xl/tables/") and name.endswith(".xml") for name in names),
+                images=sum(name.startswith("xl/media/") for name in names),
+            )
     elif suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}:
         from PIL import Image
 
@@ -164,59 +161,60 @@ def run_case(path, output_dir, source_language, target_language, engine, glossar
             reasoning_effort=reasoning_effort, glossary_mode=glossary_mode, hybrid=hybrid,
             skip_review=skip_review,
         )
-    except (ConfigurationError, ExternalServiceError, APIError, AzureError,
-            requests.RequestException, OSError, ValueError) as error:
+        wall_seconds = time.perf_counter() - started
+        report_dir = output_dir / job_id
+        preview = json.loads((report_dir / "showcase.json").read_text(encoding="utf-8"))
+        output = report_dir / report["outputFile"]
+        source_structure, output_structure = document_structure(path), document_structure(output)
+        fidelity = exact_values(preview["sourceText"], preview["translatedText"])
+        translation = report["translation"]
+        details = translation["engineDetails"]
+        pages = source_structure["pages"] or source_structure["slides"] or 1
+        routing = report.get("hybridRouting", {})
+        row.update({
+            "status": report["status"],
+            "maturity": details["maturity"],
+            "model": details["model"],
+            "modelVersion": details["modelVersion"],
+            "apiVersion": details["apiVersion"],
+            "deploymentType": details["deploymentType"],
+            "wallSeconds": wall_seconds,
+            "secondsPerPage": wall_seconds / pages,
+            "inputTokens": translation.get("inputTokens"),
+            "outputTokens": translation.get("outputTokens"),
+            "reasoningTokens": translation.get("reasoningTokens"),
+            "inputCharacters": len(preview["sourceText"]),
+            "outputCharacters": len(preview["translatedText"]),
+            "charactersCharged": translation.get("charactersCharged"),
+            "estimatedCostUSD": report.get("costSignals", {}).get("estimatedCostUSD"),
+            "stepDurationsSeconds": json.dumps(
+                report.get("costSignals", {}).get("durationsSeconds", {}), sort_keys=True,
+            ),
+            "terminologyScore": terminology_score(preview["terms"], preview["translatedText"]),
+            "reviewerIssues": len(report.get("issues", [])) if report["status"] != "not_reviewed" else None,
+            "reviewerMeaningChanges": (
+                sum(issue["type"] == "meaning_shift" for issue in report.get("issues", []))
+                if report["status"] != "not_reviewed" else None
+            ),
+            "escalationRate": routing.get("escalationRate"),
+            "sourceStructure": json.dumps(source_structure, sort_keys=True),
+            "outputStructure": json.dumps(output_structure, sort_keys=True),
+            "structureMatches": structure_matches(source_structure, output_structure),
+            "numbersExact": fidelity["numbers"]["exact"],
+            "datesExact": fidelity["dates"]["exact"],
+            "idsExact": fidelity["ids"]["exact"],
+            "currencyExact": fidelity["currency"]["exact"],
+        })
+    except Exception as error:
         row["wallSeconds"] = time.perf_counter() - started
         row["errorType"] = type(error).__name__
         print(f"jobId={job_id} benchmarkCaseFailed errorType={type(error).__name__}", file=sys.stderr)
         return row
-    wall_seconds = time.perf_counter() - started
-    report_dir = output_dir / job_id
-    preview = json.loads((report_dir / "showcase.json").read_text(encoding="utf-8"))
-    output = report_dir / report["outputFile"]
-    source_structure, output_structure = document_structure(path), document_structure(output)
-    fidelity = exact_values(preview["sourceText"], preview["translatedText"])
-    translation = report["translation"]
-    details = translation["engineDetails"]
-    pages = source_structure["pages"] or source_structure["slides"] or 1
-    routing = report.get("hybridRouting", {})
-    row.update({
-        "status": report["status"],
-        "maturity": details["maturity"],
-        "model": details["model"],
-        "modelVersion": details["modelVersion"],
-        "apiVersion": details["apiVersion"],
-        "deploymentType": details["deploymentType"],
-        "wallSeconds": wall_seconds,
-        "secondsPerPage": wall_seconds / pages,
-        "inputTokens": translation.get("inputTokens"),
-        "outputTokens": translation.get("outputTokens"),
-        "reasoningTokens": translation.get("reasoningTokens"),
-        "inputCharacters": len(preview["sourceText"]),
-        "outputCharacters": len(preview["translatedText"]),
-        "charactersCharged": translation.get("charactersCharged"),
-        "estimatedCostUSD": report.get("costSignals", {}).get("estimatedCostUSD"),
-        "stepDurationsSeconds": json.dumps(report.get("costSignals", {}).get("durationsSeconds", {}), sort_keys=True),
-        "terminologyScore": terminology_score(preview["terms"], preview["translatedText"]),
-        "reviewerIssues": len(report.get("issues", [])) if report["status"] != "not_reviewed" else None,
-        "reviewerMeaningChanges": (
-            sum(issue["type"] == "meaning_shift" for issue in report.get("issues", []))
-            if report["status"] != "not_reviewed" else None
-        ),
-        "escalationRate": routing.get("escalationRate"),
-        "sourceStructure": json.dumps(source_structure, sort_keys=True),
-        "outputStructure": json.dumps(output_structure, sort_keys=True),
-        "structureMatches": structure_matches(source_structure, output_structure),
-        "numbersExact": fidelity["numbers"]["exact"],
-        "datesExact": fidelity["dates"]["exact"],
-        "idsExact": fidelity["ids"]["exact"],
-        "currencyExact": fidelity["currency"]["exact"],
-    })
     return row
 
 
 def write_summary(rows, path):
-    engines = ("gpt6_luna", "gpt6_1_terra", "gpt5_6_luna")
+    engines = dict.fromkeys(row["engine"] for row in rows)
     lines = [
         "# Translation engine benchmark",
         "",

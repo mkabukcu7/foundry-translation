@@ -19,6 +19,12 @@ def test_retrieval_glossary_uses_local_sparse_term_vectors():
     assert context["terms"] == terms
 
 
+def test_retrieval_glossary_skips_terms_without_word_tokens():
+    data = "it,en\n€,EUR\npolizza,policy\n"
+    terms = glossary.relevant_terms(data, "it", "en", "polizza assicurata", "retrieval")
+    assert [term["term"] for term in terms] == ["polizza"]
+
+
 def test_glossary_mode_none_and_unknown_modes():
     assert glossary.relevant_terms(GLOSSARY, "it", "en", "polizza", "none") == []
     with pytest.raises(ValueError, match="Glossary mode"):

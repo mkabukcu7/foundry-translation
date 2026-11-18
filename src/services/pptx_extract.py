@@ -123,8 +123,8 @@ def _extract_image_sidecar(presentation, *, job_id):
     image_pages = [index for index, slide in enumerate(presentation.slides) if _slide_has_images(slide)]
     if image_pages:
         # Clear editable text only in this temporary rendering copy, never in the output.
-        for part in {part for slide in presentation.slides for part in _slide_parts(slide)}:
-            for node in part._element.xpath(".//a:p/a:r/a:t | .//a:p/a:fld/a:t"):
+        for slide in presentation.slides:
+            for node in slide.part._element.xpath(".//a:p/a:r/a:t | .//a:p/a:fld/a:t"):
                 node.text = ""
         temporary = io.BytesIO()
         presentation.save(temporary)

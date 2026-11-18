@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 from pptx import Presentation
 from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches
 from pypdf import PdfReader
 
@@ -16,7 +17,12 @@ from tests.test_pipeline import pdf
 def test_pptx_image_sidecar_ocr_excludes_native_text_and_keeps_original_geometry(monkeypatch):
     presentation = Presentation()
     blank = presentation.slide_layouts[6]
-    presentation.slides.add_slide(blank).shapes.add_textbox(0, 0, Inches(2), Inches(1)).text = "First slide"
+    first_slide = presentation.slides.add_slide(blank)
+    first_slide.shapes.add_textbox(0, 0, Inches(2), Inches(1)).text = "First slide"
+    inherited = first_slide.shapes.add_textbox(0, 0, Inches(2), Inches(1))
+    inherited.text = "Inherited footer"
+    first_slide.shapes._spTree.remove(inherited.element)
+    blank.shapes._spTree.insert_element_before(inherited.element, "p:extLst")
     slide = presentation.slides.add_slide(blank)
     box = slide.shapes.add_textbox(0, 0, Inches(2), Inches(1))
     box.text = "Original title"
@@ -33,10 +39,14 @@ def test_pptx_image_sidecar_ocr_excludes_native_text_and_keeps_original_geometry
     def render(data):
         rendering = Presentation(io.BytesIO(data))
         assert all(not frame.text for page in rendering.slides for frame in pptx_extract.text_frames(page))
+        assert any(shape.has_text_frame and shape.text == "Inherited footer"
+                   for shape in rendering.slides[1].slide_layout.shapes)
         assert rendering.slides[1].shapes[2].image.blob == picture.image.blob
         return pdf(2)
 
-    ocr = MagicMock(return_value={"segments": [{"text": "Picture label", "location": "reading-order:1"}]})
+    ocr = MagicMock(return_value={
+        "segments": [{"text": "Inherited footer Picture label", "location": "reading-order:1"}],
+    })
     monkeypatch.setattr(pptx_extract.slide_render, "render", render)
     monkeypatch.setattr(pptx_extract.docintel_client, "extract", ocr)
     extracted = pptx_extract.extract(original.getvalue(), positioned=True, image_sidecar=True, job_id="sample")
@@ -44,6 +54,7 @@ def test_pptx_image_sidecar_ocr_excludes_native_text_and_keeps_original_geometry
     assert [(s["page"], s["role"]) for s in extracted["segments"]] == [
         (1, "paragraph"), (2, "paragraph"), (2, "paragraph"), (2, "image_text"),
     ]
+    assert extracted["segments"][-1]["text"] == "Inherited footer Picture label"
     ocr.assert_called_once()
     assert ocr.call_args.kwargs["job_id"] == "sample"
 
@@ -115,6 +126,37 @@ def test_native_pptx_replaces_paragraphs_and_tables_without_changing_slides():
     assert output.slides[0].shapes[0].text == "Hello world"
     assert output.slides[0].shapes[1].table.cell(0, 0).text == "Amount"
     assert output.slides[0].shapes[0].left == shape.left
+
+
+def test_pptx_translation_replaces_fields_and_recreates_soft_breaks():
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    shape = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(1))
+    paragraph = shape.text_frame.paragraphs[0]
+    first = paragraph.add_run()
+    first.text = "Before"
+    first.font.bold = True
+    field = OxmlElement("a:fld")
+    field.set("id", "{00000000-0000-0000-0000-000000000001}")
+    field.set("type", "datetime")
+    field_text = OxmlElement("a:t")
+    field_text.text = "FIELD"
+    field.append(field_text)
+    paragraph._p.append(field)
+    paragraph.add_line_break()
+    paragraph.add_run().text = "After"
+    original = io.BytesIO()
+    presentation.save(original)
+
+    translated = document_output.pptx(original.getvalue(), [{
+        "page": 1, "frame": 0, "paragraph": 0, "text": "Translated\nline",
+    }], False)
+    rebuilt = Presentation(io.BytesIO(translated))
+    output_paragraph = rebuilt.slides[0].shapes[0].text_frame.paragraphs[0]
+    assert output_paragraph.text == "Translated\vline"
+    assert output_paragraph.runs[0].font.bold
+    assert not output_paragraph._p.xpath("./a:fld")
+    assert len(output_paragraph._p.xpath(".//a:br")) == 1
 
 
 @pytest.mark.parametrize("extension,format_name", [

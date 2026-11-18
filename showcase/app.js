@@ -84,12 +84,15 @@ function render(data) {
   const engine = translation.engineDetails || {};
   const engineLabels = {
     translator:"Azure Translator NMT", doc_llm:"Document Translator LLM",
-    gpt6_luna:"GPT-6 Luna", gpt6_1_terra:"GPT-6.1 Terra", gpt5_6_luna:"GPT-5.6 Luna baseline"
+    gpt6_luna:"GPT-6 Luna", gpt6_1_terra:"GPT-6.1 Terra", gpt5_6_luna:"GPT-5.6 Luna baseline",
+    foundry_agent:"Pinned Foundry agent"
   };
   $("strategy-title").textContent = engineLabels[engine.engine] || "Engine not recorded";
   $("strategy-details").textContent = [
     engine.maturity,
     engine.model && `model ${engine.model}`,
+    engine.agent && `agent ${engine.agent}`,
+    engine.agentVersion && `version ${engine.agentVersion}`,
     engine.deploymentName && `deployment ${engine.deploymentName}`,
     engine.deploymentType,
     engine.apiVersion && `API ${engine.apiVersion}`,

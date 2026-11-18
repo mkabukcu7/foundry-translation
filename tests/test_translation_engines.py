@@ -12,6 +12,23 @@ def test_translator_profile_defaults_to_ga_nmt():
     assert metadata(settings)["engine"] == "translator"
 
 
+def test_whitespace_only_settings_use_configured_defaults(monkeypatch):
+    monkeypatch.setenv("TRANSLATOR_DEPLOYMENT_TYPE", " ")
+    assert config("translator").deployment_type == "Regional"
+
+    monkeypatch.setenv("GPT6_1_TERRA_MODEL_NAME", "gpt-6.1-terra")
+    monkeypatch.setenv("GPT6_1_TERRA_DEPLOYMENT_NAME", "")
+    assert config("gpt6_1_terra").deployment_name == "gpt-6.1-terra"
+
+    monkeypatch.setenv("GPT6_LUNA_DEPLOYMENT_TYPE", "DataZone")
+    monkeypatch.setenv("CHECKER_DEPLOYMENT_TYPE", " ")
+    monkeypatch.setenv("CHECKER_INPUT_RATE_DATAZONE", "0.1")
+    monkeypatch.setenv("CHECKER_OUTPUT_RATE_DATAZONE", "0.5")
+    from services.translation_engines import estimate_role_cost
+
+    assert estimate_role_cost("translation-checker", {"inputTokens": 1_000_000, "outputTokens": 1_000_000}) == 0.6
+
+
 def test_document_llm_profile_is_explicitly_preview(monkeypatch):
     monkeypatch.setenv("DOC_LLM_MODEL_NAME", "gpt-6-luna")
     monkeypatch.setenv("DOC_LLM_DEPLOYMENT_NAME", "eu-luna-doc-translation")

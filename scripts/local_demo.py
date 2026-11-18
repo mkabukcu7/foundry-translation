@@ -129,6 +129,11 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
     engine_settings = translation_engines.config(selected_engine, reasoning_effort=reasoning_effort)
     if engine is not None:
         strategy = "translator" if selected_engine in {"translator", "doc_llm"} else "direct_gpt"
+    use_pinned_agent = (
+        engine is None and strategy == "direct_gpt"
+        and bool(os.getenv("TRANSLATION_AGENT_NAME", "").strip())
+    )
+    model_override = None if use_pinned_agent else engine_settings.deployment_name
     glossary_mode = glossary_mode or os.getenv("GLOSSARY_MODE", "static").strip().lower()
     if glossary_mode not in {"none", "static", "retrieval"}:
         raise ValueError("Glossary mode must be none, static or retrieval")
@@ -232,7 +237,7 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
     elif strategy == "direct_gpt":
         translated, translation = contextual_translation.translate(
             extracted["segments"], source_language, target_language, prepared["terms"], job_id,
-            strategy=strategy, model=engine_settings.deployment_name,
+            strategy=strategy, model=model_override,
             reasoning_effort=engine_settings.reasoning_effort,
             glossary_mode=glossary_mode,
         )
@@ -359,15 +364,17 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
         report["hybridRouting"] = hybrid_report
     translation["inputCharacters"] = sum(len(segment["text"]) for segment in extracted["segments"])
     translation["outputCharacters"] = sum(len(segment["text"]) for segment in translated["segments"])
-    translation_cost = translation_engines.estimate_cost(
-        engine_settings,
-        input_tokens=translation.get("inputTokens", 0),
-        output_tokens=translation.get("outputTokens", 0),
-        characters=(
-            translation.get("charactersCharged")
-            if translation.get("charactersCharged") is not None
-            else translation["inputCharacters"]
-        ),
+    translation_cost = (
+        None if translation.get("agent") else translation_engines.estimate_cost(
+            engine_settings,
+            input_tokens=translation.get("inputTokens", 0),
+            output_tokens=translation.get("outputTokens", 0),
+            characters=(
+                translation.get("charactersCharged")
+                if translation.get("charactersCharged") is not None
+                else translation["inputCharacters"]
+            ),
+        )
     )
     translation["estimatedCostUSD"] = translation_cost
     if hybrid_report is not None:
@@ -392,6 +399,19 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
         translation["estimatedCostUSD"] + review_cost
         if translation["estimatedCostUSD"] is not None and review_cost is not None else None
     )
+    engine_details = translation_engines.metadata(engine_settings)
+    if translation.get("agent"):
+        engine_details.update(
+            engine="foundry_agent",
+            model=translation["model"],
+            deploymentName=None,
+            deploymentType=None,
+            modelVersion=None,
+            maturity=None,
+            reasoningEffort=None,
+            agent=translation["agent"],
+            agentVersion=translation.get("version"),
+        )
     report.update({
         "jobId": job_id, "sourceFile": source.name, "sourceSha256": hashlib.sha256(data).hexdigest(),
         "sourceLanguage": source_language, "targetLanguage": target_language,
@@ -400,7 +420,7 @@ def run_file(source: Path, output_dir: Path, source_language="it", target_langua
         "workflow": "translator_only" if translator_only else "assisted",
         "translation": {
             "strategy": strategy, **translation,
-            "engineDetails": translation_engines.metadata(engine_settings),
+            "engineDetails": engine_details,
         },
         "layoutPreserved": layout_preserved,
         "documentFidelity": {

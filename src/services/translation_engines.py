@@ -32,7 +32,7 @@ _MODEL_SETTINGS = {
 
 
 def _value(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    return os.getenv(name, "").strip() or default
 
 
 def config(engine: str, *, reasoning_effort: str | None = None) -> EngineConfig:

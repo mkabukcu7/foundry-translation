@@ -64,10 +64,37 @@ def test_docx_preserves_package_and_translates_paragraphs_tables_headers():
 @pytest.mark.parametrize("extra", [
     "<w:p><w:ins><w:r><w:t>Revision</w:t></w:r></w:ins></w:p>",
     '<w:p><w:fldSimple w:instr="PAGE"/></w:p>',
+    "<w:p><w:moveFrom><w:r><w:t>Moved out</w:t></w:r></w:moveFrom></w:p>",
+    "<w:p><w:moveTo><w:r><w:t>Moved in</w:t></w:r></w:moveTo></w:p>",
+    '<w:p><w:moveFromRangeStart w:id="1" w:author="reviewer"/></w:p>',
 ])
 def test_docx_rejects_revisions_and_dynamic_fields(extra):
     with pytest.raises(ValueError, match="tracked changes and dynamic fields"):
         validate_document(docx(extra), "source.docx")
+
+
+def test_docx_preserves_and_rebuilds_tabs_and_manual_line_breaks():
+    original = docx(
+        "<w:p><w:r><w:t>Uno</w:t><w:tab/><w:t>due</w:t><w:br/>"
+        "<w:t>tre</w:t><w:cr/><w:t>quattro</w:t></w:r></w:p>",
+    )
+    extracted = docx_document.extract(original)["segments"]
+    source = next(segment for segment in extracted if segment["text"] == "Uno\tdue\ntre\nquattro")
+    rebuilt = docx_document.rebuild(original, [
+        {**segment, "text": ("One\tsecond\nthird" if segment["location"] == source["location"]
+                             else segment["text"])}
+        for segment in extracted
+    ])
+    translated = next(
+        segment for segment in docx_document.extract(rebuilt)["segments"]
+        if segment["location"] == source["location"]
+    )
+    assert translated["text"] == "One\tsecond\nthird"
+    with ZipFile(io.BytesIO(rebuilt)) as archive:
+        root = docx_document.parse(archive.read("word/document.xml"))
+        assert len(root.xpath("//w:tab", namespaces=docx_document.NS)) == 1
+        assert len(root.xpath("//w:br", namespaces=docx_document.NS)) == 1
+        assert not root.xpath("//w:cr", namespaces=docx_document.NS)
 
 
 @pytest.mark.parametrize("strategy", ["translator", "direct_gpt", "translator_refine"])

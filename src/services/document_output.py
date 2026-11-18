@@ -3,12 +3,15 @@
 
 import io
 from collections import Counter
+from copy import deepcopy
 from xml.sax.saxutils import escape
 
 from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.oxml.ns import qn
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Pt
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.styles import ParagraphStyle
@@ -147,12 +150,31 @@ def pptx(data, segments, contains_images, *, source_segments=(), image_sidecar=F
             target = frame.paragraphs[segment["paragraph"]]
             if target.text == segment["text"]:
                 continue
-            if target.runs:
-                target.runs[0].text = segment["text"]
-                for run in target.runs[1:]:
-                    run.text = ""
-            else:
-                target.text = segment["text"]
+            run_template = deepcopy(target.runs[0]._r) if target.runs else None
+            run_properties = run_template.rPr if run_template is not None else None
+            end_properties = target._p.find(qn("a:endParaRPr"))
+            for child in list(target._p):
+                if child.tag not in {qn("a:pPr"), qn("a:endParaRPr")}:
+                    target._p.remove(child)
+
+            def append_content(element):
+                position = target._p.index(end_properties) if end_properties is not None else len(target._p)
+                target._p.insert(position, element)
+
+            lines = segment["text"].replace("\v", "\n").split("\n")
+            for index, line in enumerate(lines):
+                if index:
+                    append_content(OxmlElement("a:br"))
+                if line or len(lines) == 1:
+                    run = OxmlElement("a:r")
+                    if run_properties is not None:
+                        run.append(deepcopy(run_properties))
+                    text = OxmlElement("a:t")
+                    text.text = line
+                    if line != line.strip():
+                        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                    run.append(text)
+                    append_content(run)
             if not image_sidecar:
                 frame.word_wrap = True
                 frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE

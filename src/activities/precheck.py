@@ -17,6 +17,8 @@ IMAGE_FORMATS = {
     ".tif": "TIFF",
     ".tiff": "TIFF",
 }
+MAX_IMAGE_FRAMES = 100
+MAX_TOTAL_IMAGE_PIXELS = 40_000_000
 
 
 def validate_document(data: bytes, filename: str):
@@ -57,9 +59,19 @@ def validate_document(data: bytes, filename: str):
                     extension for extension in IMAGE_FORMATS if filename.lower().endswith(extension)
                 )]:
                     raise ValueError("Image content does not match its filename extension")
-                width, height = image.size
-                if not 50 <= width <= 10000 or not 50 <= height <= 10000:
-                    raise ValueError("Image dimensions must be between 50 and 10,000 pixels")
+                frame_count = getattr(image, "n_frames", 1)
+                if frame_count > MAX_IMAGE_FRAMES:
+                    raise ValueError("Image exceeds the maximum frame count")
+                total_pixels = 0
+                for frame in range(frame_count):
+                    image.seek(frame)
+                    width, height = image.size
+                    if not 50 <= width <= 10000 or not 50 <= height <= 10000:
+                        raise ValueError("Image dimensions must be between 50 and 10,000 pixels")
+                    total_pixels += width * height
+                    if total_pixels > MAX_TOTAL_IMAGE_PIXELS:
+                        raise ValueError("Image exceeds the maximum decoded pixel count")
+                image.seek(0)
                 image.verify()
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
             raise ValueError("Invalid or unsupported image") from error

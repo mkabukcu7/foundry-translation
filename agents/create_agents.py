@@ -103,16 +103,21 @@ def ensure_translation_agent(client, name, config):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--write-env", type=Path, help="Write agent version environment assignments")
+    parser.add_argument(
+        "--create-comparison-agents", action="store_true",
+        help="Also create the optional comparison translation agents.",
+    )
     args = parser.parse_args()
     client = project()
     versions = {
         "TERM_GUARD_VERSION": ensure_agent(client, "term-guard"),
         "CHECKER_VERSION": ensure_agent(client, "translation-checker"),
     }
-    versions.update({
-        name: ensure_translation_agent(client, name, config)
-        for name, config in TRANSLATION_AGENTS.items()
-    })
+    if args.create_comparison_agents:
+        versions.update({
+            name: ensure_translation_agent(client, name, config)
+            for name, config in TRANSLATION_AGENTS.items()
+        })
     if args.write_env:
         versions_to_write = {key: value for key, value in versions.items()
                              if key in {"TERM_GUARD_VERSION", "CHECKER_VERSION"}}

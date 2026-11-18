@@ -1,11 +1,13 @@
 import io
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import jsonschema
 import pytest
+from PIL import Image
 from pptx import Presentation
 from pypdf import PdfReader, PdfWriter
 from pypdf.constants import UserAccessPermissions
@@ -13,6 +15,7 @@ from reportlab.pdfgen import canvas
 
 from activities.precheck import validate_document
 from activities.route import WATERMARK, watermark
+from agents import create_agents
 from agents.create_agents import ensure_agent
 from services import storage
 from services.models import Review, Terms
@@ -46,6 +49,66 @@ def test_pdf_rejects_encrypted_and_copy_restricted():
     secured = output.getvalue()
     with pytest.raises(ValueError, match="Encrypted"):
         validate_document(secured, "x.pdf")
+
+
+def test_image_validation_accepts_supported_formats_and_rejects_mismatches():
+    for extension, image_format in (("jpg", "JPEG"), ("png", "PNG"), ("bmp", "BMP"), ("tiff", "TIFF")):
+        output = io.BytesIO()
+        Image.new("RGB", (100, 100), "white").save(output, format=image_format)
+        validate_document(output.getvalue(), f"marketing.{extension}")
+    jpeg = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(jpeg, format="JPEG")
+    with pytest.raises(ValueError, match="does not match"):
+        validate_document(jpeg.getvalue(), "marketing.png")
+    with pytest.raises(ValueError, match="Invalid or unsupported image"):
+        validate_document(b"not an image", "marketing.png")
+    with pytest.raises(ValueError, match="dimensions"):
+        output = io.BytesIO()
+        Image.new("RGB", (40, 100), "white").save(output, format="PNG")
+        validate_document(output.getvalue(), "small.png")
+
+
+def test_tiff_validation_bounds_every_frame_and_aggregate_pixels(monkeypatch):
+    output = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(
+        output, format="TIFF", save_all=True,
+        append_images=[Image.new("RGB", (100, 100), "black")],
+    )
+    image = output.getvalue()
+    monkeypatch.setattr("activities.precheck.MAX_IMAGE_FRAMES", 1)
+    with pytest.raises(ValueError, match="frame count"):
+        validate_document(image, "multipage.tiff")
+
+    monkeypatch.setattr("activities.precheck.MAX_IMAGE_FRAMES", 10)
+    monkeypatch.setattr("activities.precheck.MAX_TOTAL_IMAGE_PIXELS", 15_000)
+    with pytest.raises(ValueError, match="decoded pixel count"):
+        validate_document(image, "multipage.tiff")
+
+    output = io.BytesIO()
+    Image.new("RGB", (100, 100), "white").save(
+        output, format="TIFF", save_all=True,
+        append_images=[Image.new("RGB", (20, 100), "black")],
+    )
+    with pytest.raises(ValueError, match="dimensions"):
+        validate_document(output.getvalue(), "multipage.tiff")
+
+
+@pytest.mark.parametrize("comparison", [False, True])
+def test_comparison_agent_creation_is_opt_in(monkeypatch, tmp_path, comparison):
+    monkeypatch.setattr(create_agents, "project", lambda: object())
+    primary = MagicMock(side_effect=["1", "2"])
+    comparison_agent = MagicMock(return_value={"version": "3", "model": "comparison"})
+    monkeypatch.setattr(create_agents, "ensure_agent", primary)
+    monkeypatch.setattr(create_agents, "ensure_translation_agent", comparison_agent)
+    output = tmp_path / "agent-versions.env"
+    monkeypatch.setattr(sys, "argv", [
+        "create_agents.py", "--write-env", str(output),
+        *(["--create-comparison-agents"] if comparison else []),
+    ])
+    create_agents.main()
+    assert primary.call_count == 2
+    assert comparison_agent.call_count == (2 if comparison else 0)
+    assert output.read_text() == "TERM_GUARD_VERSION=1\nCHECKER_VERSION=2\n"
 
 
 def test_watermarks_every_page_and_slide():

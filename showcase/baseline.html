@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Translator only | Translation Lab</title>
-  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/job-status.js" defer></script>
+  <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="topbar"><a class="brand" href="/"><span class="brand-icon">T</span> Translation Lab <span class="tag">TRANSLATOR ONLY</span></a><span class="local"><span class="dot"></span> LOCALHOST : 8766</span></header>
@@ -11,7 +13,7 @@
     <section class="hero">
       <div><p class="eyebrow">THE BASELINE / NO FOUNDRY CALLS</p>
         <h1>Translate the document.<br><span>Inspect the raw result.</span></h1>
-        <p class="intro">Run the same Italian document here and in the assisted showcase. This page uses Azure Translator without a glossary, Term Guard, deterministic quality checks or AI reviewers.</p>
+        <p class="intro">Run the same Italian or Spanish document here and in the assisted showcase. This page uses Azure Translator without a glossary, Term Guard, deterministic quality checks or AI reviewers.</p>
       </div>
       <aside class="architecture"><span class="tag">COMPARE IN PARALLEL</span><h3>What is included?</h3>
         <p>Document Intelligence <span>PDF extraction / OCR</span></p><p>Azure Translator <span>text / native PPTX</span></p>
@@ -25,9 +27,14 @@
         <p class="muted">The samples match those on port 8765. Submit the same upload to both pages for a comparison.</p>
         <div id="samples" class="sample-list"></div>
         <div class="divider"><span>or bring your own</span></div>
-        <label class="upload" for="upload"><strong>Choose a PDF or PPTX</strong><span>PDF 40 MiB / native-text PPTX 10 MiB</span><input id="upload" type="file" accept=".pdf,.pptx"></label>
+        <label class="upload" for="upload"><strong>Choose a PDF, PPTX, DOCX, XLSX, or image</strong><span>PDF / images 40 MiB / PPTX, DOCX and XLSX 10 MiB</span><input id="upload" type="file" accept=".pdf,.pptx,.docx,.xlsx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"></label>
         <p id="file-name" class="selected-file">Synthetic sample selected</p>
-        <div class="language"><span>Italian <strong>IT</strong></span><span>&rarr;</span><span>English <strong>EN</strong></span></div>
+        <div class="language"><label for="source-language">Source language
+          <select id="source-language"><option value="it">Italian</option><option value="es">Spanish</option><option value="en">English</option></select>
+        </label><span>&rarr;</span><label for="target-language">Target language
+          <select id="target-language"><option value="en">English</option><option value="es">Spanish</option><option value="it">Italian</option></select>
+        </label></div>
+        <p class="fine">Built-in samples are Italian. For Spanish, upload your own document.</p>
         <button id="run" class="primary" disabled>Translate only</button>
         <p class="fine">Real, billable Azure calls using your local Azure identity. PDF extraction/OCR still uses Document Intelligence. No glossary or agent tokens. Local files are sent to the configured Azure services.</p>
         <hr><p class="eyebrow">SAVED BASELINE RESULTS</p><p class="fine">Reopen without additional Azure calls.</p><div id="history" class="history"></div>
@@ -38,6 +45,7 @@
             <li data-stage="validate"><b>1</b><span>Validate<small>File safety</small></span></li>
             <li data-stage="extract"><b>2</b><span>Extract<small>Text / OCR</small></span></li>
             <li data-stage="translate"><b>3</b><span>Translate<small>No glossary</small></span></li>
+            <li data-stage="reconstruct"><b>4</b><span>Rebuild file<small>Format and text fit</small></span></li>
           </ol>
           <p id="progress-note" class="fine" role="status" aria-live="polite">No Term Guard or reviewer stages are run.</p><p id="error" class="error" role="alert" hidden></p>
         </section>
@@ -46,12 +54,12 @@
           <section class="panel">
             <div class="section-heading"><div><p class="eyebrow">03 / RAW TRANSLATOR OUTPUT</p><h2>Translation finished. Quality not evaluated.</h2></div><span class="badge review">NOT REVIEWED</span></div>
             <p id="job-id" class="mono fine"></p><div id="metrics" class="metrics"></div>
-            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="report" class="text-link" download>Download usage report &darr;</a></div>
+            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="download-text" class="text-link" download>Download companion TXT &darr;</a><a id="report" class="text-link" download>Download usage report &darr;</a></div>
             <ul id="limitations" class="fine"></ul>
           </section>
-          <section class="panel"><p class="eyebrow">DOCUMENT VIEW</p><h2>Italian source &amp; English translation</h2>
-            <div class="text-comparison"><div><h3>Italian source</h3><pre id="source-text"></pre></div><div><h3>English translation</h3><pre id="target-text"></pre></div></div>
-            <p class="fine">PDF output is translated text, not the original PDF layout. Native PPTX structure is available in the download; images and charts are rejected. No review watermark is added because no review was performed.</p>
+          <section class="panel"><p class="eyebrow">DOCUMENT VIEW</p><h2>Source &amp; translation</h2>
+            <div class="text-comparison"><div><h3 id="source-heading">Source text</h3><pre id="source-text"></pre></div><div><h3 id="target-heading">Translation</h3><pre id="target-text"></pre></div></div>
+            <p class="fine">PowerPoint preserves existing shapes and tables. Text found inside pictures is translated in the companion TXT only. PDF and standalone image text is overlaid in white regions; typography and backgrounds may differ. Charts are not supported. This baseline does not perform quality review.</p>
           </section>
           <section class="panel"><p class="eyebrow">FAIR COMPARISON</p><h2>What this does &mdash; and does not &mdash; prove</h2>
             <p class="muted">Both pages use the same extraction and Translator adapters. This page sends no glossary and makes no Foundry calls. Each page makes separate service requests, so outputs and latency can vary.</p>

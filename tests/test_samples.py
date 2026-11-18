@@ -38,3 +38,4 @@ def test_image_slides_use_rendered_ocr_without_duplicate_native_text(tmp_path, m
     assert calls == ["prebuilt-read", "prebuilt-read"]
     assert [s["location"] for s in result["segments"]] == ["slide:1", "slide:2"]
     assert all(s["text"] == "OCR includes SIE-2025-001207" for s in result["segments"])
+    assert result["containsImages"] and result["pageCount"] == 2

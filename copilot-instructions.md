@@ -1,4 +1,4 @@
-# Project rules — Aon Document Translation POC
+# Project rules — Document Translation POC
 
 ## Working style
 - Work in phases. After each phase: summarize what was built, list open questions, and STOP for review.

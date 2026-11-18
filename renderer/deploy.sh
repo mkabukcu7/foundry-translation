@@ -8,8 +8,8 @@ set -euo pipefail
 : "${AZURE_TENANT_ID:?Set AZURE_TENANT_ID}"
 : "${RENDERER_CLIENT_ID:?Set RENDERER_CLIENT_ID}"
 : "${RENDERER_REGISTRY:?Set globally unique alphanumeric RENDERER_REGISTRY}"
-name="${RENDERER_APP_NAME:-aon-slide-renderer}"
-environment="${RENDERER_ENVIRONMENT:-aon-renderer}"
+name="${RENDERER_APP_NAME:-translation-slide-renderer}"
+environment="${RENDERER_ENVIRONMENT:-translation-renderer}"
 az acr create -g "$AZURE_RESOURCE_GROUP" -n "$RENDERER_REGISTRY" --sku Basic --admin-enabled false -o none
 az acr build -r "$RENDERER_REGISTRY" --image renderer:v1 "$(dirname "$0")" -o none
 identity_id=$(az identity create -g "$AZURE_RESOURCE_GROUP" -n "${name}-pull" --query id -o tsv)

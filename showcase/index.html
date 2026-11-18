@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Translation Lab | Agent showcase</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/job-status.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -16,7 +17,7 @@
     <section class="hero">
       <div><p class="eyebrow">FROM TRANSLATION TO TRUST</p>
         <h1>Translate the document.<br><span>Show what the agents catch.</span></h1>
-        <p class="intro">Italian to English, with terminology protection and independent AI reviewers.
+        <p class="intro">Translate between Italian, Spanish and English, with terminology protection and independent AI reviewers.
           See what Translator produces, what the agents flag, and why a human may need to take a look.</p>
       </div>
       <aside class="architecture">
@@ -36,16 +37,37 @@
         <p class="muted">Synthetic insurance documents. No real customer data.</p>
         <div id="samples" class="sample-list"></div>
         <div class="divider"><span>or bring your own</span></div>
-        <label class="upload" for="upload"><strong>Choose a PDF or PPTX</strong><span>PDF up to 40 MiB / PPTX up to 10 MiB</span>
-          <input id="upload" type="file" accept=".pdf,.pptx">
+        <label class="upload" for="upload"><strong>Choose a PDF, PPTX, DOCX, XLSX, or image</strong><span>PDF / images up to 40 MiB / PPTX, DOCX and XLSX up to 10 MiB</span>
+          <input id="upload" type="file" accept=".pdf,.pptx,.docx,.xlsx,.jpg,.jpeg,.png,.bmp,.tif,.tiff">
         </label>
         <p id="file-name" class="selected-file">No file selected</p>
-        <div class="language"><span>Italian <strong>IT</strong></span><span aria-hidden="true">&rarr;</span><span>English <strong>EN</strong></span></div>
+        <div class="language"><label for="source-language">Source language
+          <select id="source-language"><option value="it">Italian</option><option value="es">Spanish</option><option value="en">English</option></select>
+        </label><span aria-hidden="true">&rarr;</span><label for="target-language">Target language
+          <select id="target-language"><option value="en">English</option><option value="es">Spanish</option><option value="it">Italian</option></select>
+        </label></div>
+        <p class="fine">Built-in samples are Italian. For Spanish, upload your own document.</p>
+        <label class="strategy-label" for="strategy">Translation engine</label>
+        <select id="strategy">
+          <option value="translator">Azure Translator NMT / glossary</option>
+          <option value="doc_llm">Document Translator LLM / PREVIEW</option>
+          <option value="gpt6_luna">GPT-6 Luna / default</option>
+          <option value="gpt6_1_terra">GPT-6.1 Terra / comparison</option>
+          <option value="gpt5_6_luna">GPT-5.6 Luna / baseline only</option>
+        </select>
+        <label class="strategy-label" for="reasoning-effort">Reasoning effort</label>
+        <select id="reasoning-effort"><option value="low">Low (default)</option><option value="none">None</option><option value="medium">Medium</option></select>
+        <label class="strategy-label" for="glossary-mode">Glossary mode</label>
+        <select id="glossary-mode"><option value="static">Static glossary</option><option value="retrieval">Local retrieval</option><option value="none">None</option></select>
+        <label class="checkbox-label"><input id="hybrid" type="checkbox"> Escalate terminology / meaning flags to GPT-6.1 Terra</label>
+        <p class="fine">Model options require the matching Foundry deployment settings in .env. Document Translator LLM is a public-preview feature. Layout fidelity is not automatically assessed. Local retrieval uses lightweight lexical matching, not Azure AI Search.</p>
         <button id="run" class="primary" disabled>Translate &amp; review</button>
         <p class="fine">Runs real, billable Azure calls using your local Azure identity. Files and reports remain on this machine; document data is sent to the configured Azure AI services.</p>
         <details class="limitations"><summary>Scope &amp; limitations</summary>
-          <p>PDFs become translated text, not layout-preserved PDFs. Native-text PPTX retains document structure; images and charts are rejected.</p>
+          <p>PowerPoint text is replaced in existing shapes and tables. Text found inside pictures is translated in the companion TXT, not on the slide. PDFs and standalone images use overlays, so fonts and backgrounds may differ. Layout fidelity requires manual review. Charts are not supported.</p>
           <p>PDF terms are checked, not applied as a Translator glossary. Review scores are experimental; a pass is not certification.</p>
+          <p>DOCX keeps tables, headers, footers, and images; native text is translated. Image text and comments remain unchanged. Accept tracked changes and convert dynamic fields to text before uploading. Inline styling and pagination may change.</p>
+          <p>XLSX translates text cells, including hidden sheets. Formulas, numbers, dates, sheet names, chart text and image text remain unchanged. Text-dependent formulas and text fit need manual review. XLS and macro-enabled workbooks are unsupported.</p>
         </details>
         <hr>
         <p class="eyebrow">SAVED DEMONSTRATIONS</p>
@@ -58,9 +80,10 @@
           <ol id="stages">
             <li data-stage="validate"><b>1</b><span>Validate<small>File safety</small></span></li>
             <li data-stage="extract"><b>2</b><span>Extract<small>Text / OCR</small></span></li>
-            <li data-stage="prepare"><b>3</b><span>Term Guard<small>Protect / map</small></span></li>
-            <li data-stage="translate"><b>4</b><span>Translate<small>Azure Translator</small></span></li>
-            <li data-stage="check"><b>5</b><span>Dual review<small>Independent checks</small></span></li>
+            <li data-stage="prepare"><b>3</b><span>Glossary<small>Static / retrieval</small></span></li>
+            <li data-stage="translate"><b>4</b><span>Translate<small>Selected strategy</small></span></li>
+            <li data-stage="reconstruct"><b>5</b><span>Rebuild file<small>Format and text fit</small></span></li>
+            <li data-stage="check"><b>6</b><span>Dual review<small>Independent checks</small></span></li>
           </ol>
           <p id="progress-note" class="fine" role="status" aria-live="polite">Live stages reflect backend progress. Reviewers run in parallel when the secondary model is configured.</p>
           <p id="error" class="error" role="alert" hidden></p>
@@ -75,13 +98,17 @@
             <div class="section-heading"><div><p class="eyebrow">03 / REVIEW THE EVIDENCE</p><h2 id="verdict"></h2></div><span id="quality-badge" class="badge"></span></div>
             <p id="verdict-note" class="muted"></p><p id="job-id" class="mono fine"></p>
             <div class="metrics" id="metrics"></div>
-            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="report" class="text-link" download>Download full report &darr;</a></div>
+            <div class="downloads"><a id="download" class="button" download>Download translation</a><a id="download-text" class="text-link" download>Download companion TXT &darr;</a><a id="report" class="text-link" download>Download full report &darr;</a></div>
             <ul id="result-limitations" class="fine"></ul>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">TRANSLATION STRATEGY &amp; DOCUMENT FIDELITY</p><h2 id="strategy-title"></h2>
+            <p id="strategy-details" class="muted"></p><p id="fidelity-details" class="fine"></p>
           </section>
           <section class="panel">
             <div class="section-heading"><div><p class="eyebrow">DOCUMENT VIEW</p><h2>Source &amp; translation</h2></div><span class="tag">EXTRACTED TEXT</span></div>
             <p id="preview-note" class="fine"></p>
-            <div class="text-comparison"><div><h3>Italian source</h3><pre id="source-text"></pre></div><div><h3>English translation</h3><pre id="target-text"></pre></div></div>
+            <div class="text-comparison"><div><h3 id="source-heading">Source text</h3><pre id="source-text"></pre></div><div><h3 id="target-heading">Translation</h3><pre id="target-text"></pre></div></div>
           </section>
           <section class="panel">
             <p class="eyebrow">TERM GUARD AGENT</p><h2>What should stay protected?</h2>
@@ -99,7 +126,7 @@
             <p class="eyebrow">DETERMINISTIC CHECKS &amp; USAGE</p><h2>Keep the details inspectable</h2>
             <p class="fine">Mapped terms match whole words/phrases without case sensitivity. Names/IDs remain exact; unchanged numeric values may retain source punctuation. Checks and AI reviews are not certification. Charged characters and model tokens are usage signals, not a currency estimate.</p>
             <details><summary>Preservation and glossary checks</summary><div class="table-wrap"><table><thead><tr><th>Item</th><th>Type</th><th>Match</th><th>Side</th></tr></thead><tbody id="checks"></tbody></table></div></details>
-            <details><summary>Agent calls &amp; step timings</summary><div id="usage"></div></details>
+            <details><summary>Translation and agent calls &amp; step timings</summary><div id="usage"></div></details>
           </section>
         </div>
       </div>

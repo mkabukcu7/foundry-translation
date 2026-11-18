@@ -3,6 +3,7 @@ __pycache__/
 samples/out/
 .env
 samples/results/
+trial/
 src/local.settings.json
 .azure/
 .agent-versions.env

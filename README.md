@@ -1,4 +1,4 @@
-# Aon Document Translation POC
+# Document Translation POC
 
 Durable Functions workflow: **submit → precheck → prepare → translate → check → route → notify**.
 PDF/PPTX input, default source auto-detection and English output, with reverse translation to
@@ -22,11 +22,11 @@ Application Insights and azd. See `LICENSE.md`.
 | `infra/`, `azure.yaml` | Subscription/resource deployment, identities, RBAC, Entra API authentication |
 | `src/function_app.py`, `src/orchestrator.py` | Intake, owner-authorized status/report/download, durable timers |
 | `src/activities/`, `src/services/` | Extraction, glossary, translation, deterministic/agent review and routing |
-| `src/glossaries/aon-standard.tsv` | 22 approved Italian/Spanish/English insurance terms |
+| `src/glossaries/insurance-standard.tsv` | 22 approved Italian/Spanish/English insurance terms |
 | `src/prompts/`, `src/schemas/`, `agents/` | Structured Foundry prompt agents and idempotent version creation |
 | `renderer/` | Entra-protected LibreOffice image-slide renderer for Flex Consumption |
 | `samples/`, `scripts/translator_spike.py` | Synthetic documents, seeded oracle, live Translator spike |
-| `eval/` | Three-arm live evaluation and optional customer baseline |
+| `eval/` | Translation-strategy comparison, production pipeline evaluation and optional customer baseline |
 | `tests/` | Offline contract, intake, normalization, orchestration and routing tests |
 
 ## Setup and deploy
@@ -34,6 +34,8 @@ Application Insights and azd. See `LICENSE.md`.
 Prerequisites: Python 3.11, Azure CLI, Azure Developer CLI (`azd`), Functions Core Tools v4,
 subscription RBAC permissions to create resources and role assignments, and model quota in the
 selected region. Local PPTX rendering needs LibreOffice and a font supporting Italian/Spanish.
+On Windows, the app detects a standard LibreOffice installation under Program Files.
+For a custom installation, add its `program` directory to `PATH` before starting the app.
 
 ```bash
 python3.11 -m venv .venv
@@ -82,14 +84,24 @@ azd deploy
 Set `TERM_GUARD_MODEL_NAME` and `CHECKER_MODEL_NAME` to the chosen model deployment
 names before running the creation helper; each falls back to `FOUNDRY_MODEL_NAME`.
 The helper reuses versions only when their prompt/schema/model fingerprints match.
-The agents are managed Foundry prompt agents, not hosted custom-code agents.
+It also creates `contextual-translation-gpt` (GPT-5.4 mini by default) and
+`contextual-translation-mistral` (Mistral Large 3 by default), with model-specific
+descriptions and structured translation output. Override these agent deployments with
+`TRANSLATION_GPT_AGENT_MODEL_NAME` and `TRANSLATION_MISTRAL_AGENT_MODEL_NAME`.
+These comparison Prompt Agents are separate from the local direct/refinement inference
+model configured by `TRANSLATION_MODEL_NAME` (GPT-6 Luna by default). All are managed
+Foundry prompt agents, not hosted custom-code agents.
 
 For the value-oriented demo, use a Luna deployment for both roles. Set
 `MISTRAL_CHECKER_MODEL_NAME` to a Mistral-Large-3 deployment and
 `FOUNDRY_MODEL_ENDPOINT=https://<resource>.services.ai.azure.com/openai/v1/`
-to enable independent Chat Completions review with the same Azure credential.
+to enable independent Responses API review with the same Azure credential.
 Mistral uses JSON mode plus local schema validation, not an assumed strict-schema
-or Prompt Agent capability. Blank secondary model preserves single-checker behavior.
+or Prompt Agent capability. A single enclosing JSON Markdown fence is removed when
+returned by the secondary model; all review fields are still strictly schema-validated.
+Blank secondary model preserves single-checker behavior.
+Leave `CHECKER_REASONING_EFFORT` blank for Mistral and other non-reasoning secondary
+reviewers; set it only when the chosen secondary deployment supports reasoning.
 
 The checkers receive the same input in parallel, never each other's answers.
 Reports retain both reviews, token usage, durations, and per-issue agreement.
@@ -142,13 +154,84 @@ stop it with Ctrl+C. It uses the same ignored `.env` and Python environment as t
 local-file runner. `requirements-dev.txt` includes FastAPI and Uvicorn through the
 existing renderer requirements; no JavaScript build or new Azure resources are needed.
 
-The UI offers three synthetic Italian samples or a local PDF/PPTX upload. Clicking
-**Translate & review** starts real, billable Azure calls. It shows actual workflow
-stages, source/translated text, Term Guard terms, each reviewer's findings and model
-deployment, exact issue agreement, deterministic preservation checks, usage and timings.
+The UI offers synthetic samples or local PDF, PPTX, DOCX, XLSX, and image uploads.
+Clicking **Translate & review** starts real, billable Azure calls. It shows workflow
+stages, source/translated text, selected engine provenance, review findings, exact issue
+agreement, deterministic preservation checks, usage and timings.
 Download the translated output or full JSON report. **Saved demonstrations** opens
 earlier results without any additional Azure calls, useful for repeatable presentations.
 Text/term previews are saved for new runs only; older CLI reports still open.
+
+The local showcase offers five engine profiles: **Azure Translator NMT**,
+**Document Translator LLM (PREVIEW)**, **GPT-6 Luna**, **GPT-6.1 Terra**, and
+**GPT-5.6 Luna (baseline only)**. Configure model/deployment names, versions,
+deployment type, API version, and reasoning effort in `.env`; model deployments must
+exist in the selected Foundry region/data zone. GPT calls use the Responses API.
+Per-run reasoning choices are `none`, `low`, and `medium`; low is the default.
+The review model defaults to the configured GPT-6 Luna deployment and can be changed
+with `CHECKER_MODEL_NAME`.
+
+| Engine | POC role | Status |
+|---|---|---|
+| Azure Translator NMT | Fast default; supports glossary submission for DOCX/native PPTX | GA |
+| Document Translator LLM | DOCX/PPTX native translation with selected deployment | PREVIEW; labeled in report and logs |
+| GPT-6 Luna | Default GPT text/document translation engine | GA |
+| GPT-6.1 Terra | Image-text comparison and optional hybrid escalation | GA |
+| GPT-5.6 Luna | Baseline comparison only | GA |
+
+Glossary modes are `none`, `static`, and `retrieval`. The default static glossary is
+`src/glossaries/insurance-standard.tsv`; set `GLOSSARY_PATH` to a CSV/TSV file with
+`it`, `en`, and/or `es` language-code columns. LLM calls receive terms relevant to their
+segment. Local retrieval uses a small sparse lexical vector matcher, not Azure AI Search
+or semantic embeddings; it is intended for a POC comparison, not a 10K-term production index.
+
+Enable the hybrid UI option or pass `--hybrid` to retranslate only exact-matched reviewer
+excerpts with GPT-6.1 Terra. The updated document is reviewed again. Unmatched excerpts
+are reported as skipped; escalation calls, tokens, rate-derived cost, timing, and escalation
+rate are recorded. Hybrid mode supports NMT or GPT-6 Luna and requires review.
+
+For manual inspection, run `.\scripts\run-showcase.ps1 -SkipReview` to bypass both
+automated reviewers. Translation and document downloads are still available.
+The results summary shows translation input and output tokens when reported by
+the engine, even with review disabled. Expand **Translation and agent calls &
+step timings** for per-batch usage. Engines that do not return token counts
+show **Not reported**, not zero.
+Results are marked `not_reviewed`; review-driven hybrid routing is unavailable.
+The legacy direct/refinement
+strategies remain available through the CLI/API for compatibility. Restart without the
+switch to restore review (ensure `SHOWCASE_SKIP_REVIEW` is unset or `false`).
+Restarting stops any active job and loses its unsaved output.
+`CHECKER_TIMEOUT_SECONDS` sets the request timeout for each independent reviewer
+(default 600 seconds). The failed reviewer call gets one retry only when the connection
+could not be established. Timeouts and errors after a request may have been sent are
+not retried. If review cannot finish, the job names the failed reviewer, retains the
+unreviewed TXT in the showcase, and never reports approval.
+Local runs review two chunks concurrently by default, with both configured reviewers
+still checking every chunk independently. Set `LOCAL_REVIEW_PARALLEL_CHUNKS=1`
+for sequential review or choose up to `4` if your deployments have enough quota.
+With two reviewers, the default allows up to four reviewer requests in flight per
+local job. This setting does not change the Durable Functions workflow.
+Both showcase pages support Italian or Spanish source documents with English output.
+Select **Spanish** under **Source language** before submitting your upload.
+Built-in samples remain Italian and require the Italian selection.
+The engine, model/deployment names, versions, deployment type, API version, GA/PREVIEW
+state, and reasoning effort are recorded in reports. GPT output is reconstructed to the
+input file type, but visual fidelity is not automatically certified. Translator NMT uses
+native document translation for DOCX/PPTX and extracted-text translation for PDF/images;
+limitations are included with each result. Configure per-million-token prices with
+`GPT*_INPUT_RATE_*`, `GPT*_OUTPUT_RATE_*`, `CHECKER_INPUT_RATE_*`, and
+`CHECKER_OUTPUT_RATE_*`, and character prices with `TRANSLATOR_CHARACTER_RATE_*` /
+`DOC_LLM_CHARACTER_RATE_*`. Rates default blank, so total cost remains unknown rather than
+assuming or hard-coding prices. Reasoning tokens are already included in output-token
+totals and are not double-counted.
+
+When `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured, the local runner exports
+custom metrics through the Azure Monitor OpenTelemetry exporter using `DefaultAzureCredential`
+(Azure managed identity or local Azure CLI identity). Metrics include token counts by type,
+charged characters, estimated cost, and per-step duration, with job/engine/model/deployment/
+version/API/maturity/reasoning dimensions. Document content is never attached. The exporter
+is currently a preview package in this POC; no telemetry calls occur when the setting is blank.
+See [Azure Monitor OpenTelemetry for Python](https://learn.microsoft.com/en-us/python/api/overview/azure/monitor-opentelemetry-exporter-readme?view=azure-python-preview).
 
 ```powershell
 .\scripts\run-showcase.ps1
@@ -158,6 +241,8 @@ Keep the server bound to `127.0.0.1:8765`. It intentionally has no public/cloud
 authentication, rejects non-local Host headers and cross-origin submissions, and
 must not be exposed through a tunnel, reverse proxy, or network-facing bind.
 One live job runs at a time; closing the page does not cancel in-flight Azure calls.
+The browser retries brief connection failures while checking job status. It never
+automatically resubmits the translation job.
 Uploaded source files are temporary and removed after processing. Outputs, extracted
 text, terminology and private reports remain under ignored `samples/results/local/`.
 No document content is written to application logs. Failures show the stage and job ID,
@@ -166,6 +251,35 @@ not potentially sensitive service exception text.
 Use **Validate localhost translation showcase** for the offline suite and focused lint.
 The existing PDF/PPTX limitations and experimental scoring caveats below apply equally
 to the UI; it displays reviewer evidence, not hidden model reasoning.
+
+#### Engine benchmark
+
+The benchmark reads only supported files under `samples/out/` (synthetic files), and writes
+`benchmark.csv` plus `benchmark.md` under ignored `samples/results/benchmark/`. It reports
+GA/PREVIEW status, model/API versions, wall time and time per page/slide, token/character
+usage, configured-rate cost estimates, exact glossary rendering, reviewer issue counts,
+hybrid escalation rate, exact preservation of numbers/dates/IDs/currency, and source/output
+structure counts. Missing rates or unreviewed runs remain unknown rather than being reported
+as zero.
+
+```powershell
+$env:PYTHONPATH = "src;."
+python scripts\benchmark_engines.py --dry-run
+# Narrow a live run before paying for the complete matrix:
+python scripts\benchmark_engines.py --engines gpt6_luna gpt6_1_terra --glossary-modes static retrieval --reasoning-efforts none low
+# Full matrix; review and translation calls are billable:
+python scripts\benchmark_engines.py
+```
+
+The default three-sample matrix contains 135 cases. It makes live Translator, Foundry,
+and reviewer calls; `--skip-review` avoids reviewer calls but leaves reviewer results
+unavailable. `--hybrid` adds GPT-6.1 Terra escalation for NMT/GPT-6 Luna cases; incompatible
+engines are recorded as skipped. DOC_LLM rows are skipped for unsupported formats. Run
+`--dry-run` first and only use synthetic files. Retrieval mode is a local sparse lexical
+vector comparison, not semantic embedding or a 10K-term search service.
+Service failures are recorded per case and the matrix continues; any failed execution
+causes a nonzero exit code. A completed `needs_review` result is a quality flag, not an
+execution failure.
 
 #### Parallel Translator-only baseline
 
@@ -225,20 +339,118 @@ Intelligence S0. It does **not** use Azure Blob/Table/Queue Storage, a Functions
 Durable Task Scheduler, or an Entra application registration. It is a local CLI,
 not an unauthenticated HTTP API.
 
-- PDF: Document Intelligence extraction/OCR → Term Guard → Translator Text →
-  independent reviewers → local UTF-8 text. The original PDF layout is not retained.
+- PDF: Document Intelligence extraction/OCR → Term Guard → translation →
+  independent reviewers → local PDF plus UTF-8 text sidecar.
   The glossary is reviewed but **not applied** by Translator Text.
 - Native-text PPTX: extraction → Term Guard → synchronous Document Translation with
-  TSV glossary → independent reviewers → local PPTX. Images and charts are rejected;
-  image OCR and chart extraction/review are outside this mode.
+  TSV glossary → independent reviewers → local PPTX. Image-bearing slides instead
+  use rendered OCR and text translation; charts remain unsupported.
   Document limit: 10 MiB; glossary limit: 1 MiB.
+
+Select the local-file comparison strategy with `--strategy translator`,
+`--strategy direct_gpt`, or `--strategy translator_refine`. The default remains
+`translator`. All strategies now save the input file type and a UTF-8
+`translated.txt` sidecar. PDF pages and
+standalone JPEG/PNG/BMP/TIFF images and PPTX slides containing images are OCR-extracted
+before text translation. Images are limited to 40 MiB and must be
+between 50 and 10,000 pixels in each dimension.
+Text-only PPTX on the Azure Translator strategy retains its slide structure. For example:
+
+```powershell
+.\scripts\run-local-demo.ps1 -InputFile samples\out\local_claim_it.pdf -Strategy direct_gpt
+```
+
+Set `TRANSLATION_MODEL_NAME` to the Foundry deployment name to compare GPT-6 Sol or other
+compatible models without changing translation code. Direct and refinement runs make billable
+Foundry inference calls. Refinement also makes the Azure Translator call. The same
+review workflow is applied to each output; its experimental findings are not a calibrated
+per-dimension score. Fonts, logos/images, tables, layout/positioning, and page/slide
+structure are tracked as separate fidelity concerns and are not inferred from translation
+quality results.
 
 The synchronous
 [supported formats](https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/overview)
-do not include PDF; this is intentionally a text-first PDF workflow, not an assumed
+do not include PDF; PDF reconstruction is performed locally, not by an assumed
 synchronous PDF layout-preservation feature. PPTX uses the documented
 [2024-05-01 endpoint](https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/reference/translate-document).
 Both service adapters use Entra bearer tokens, never subscription keys.
+
+Same-format output is not pixel-perfect document fidelity. PDFs retain pages and
+artwork, with translated text overlaid in white OCR regions; the underlying source
+text remains searchable/selectable. Image outputs retain dimensions and file type
+(including TIFF frames), but white text regions replace their original backgrounds.
+For local image-bearing PowerPoint translation, the app reads editable text
+directly from original shapes and table cells and replaces it in place.
+Image OCR uses a temporary rendering with editable text removed to avoid
+translating the same text twice. Original pictures are unchanged; their
+translated OCR text is listed by slide in `translated.txt`. Review warnings
+for PowerPoint appear in the report and TXT, not in new shapes.
+
+**Deferred: replacing text embedded in PowerPoint pictures.** The current
+workflow leaves pictures unchanged and does not add white text boxes to slides.
+The companion TXT contains only what OCR detects; small, stylized, or
+low-contrast text can be missed or misread. Replacing text inside pictures
+would add background repair, text fitting and rendering, and visual validation
+to the workflow. A cloud image-editing fallback could add more latency and
+alter nearby artwork. Before enabling this option, benchmark end-to-end
+latency against the current TXT workflow on representative decks and check
+OCR accuracy, translation accuracy, and visual fidelity separately.
+
+The local showcase saves a PowerPoint draft before review. If review fails, the
+job remains failed and offers the draft as a separate, unreviewed download.
+Invalid reviewer JSON or schema gets one retry for the affected reviewer and
+chunk; the workflow still requires all configured reviews to succeed.
+An HTTP 429 can use the same one-retry budget. The reviewer waits for
+`retry-after-ms` or `Retry-After`, or uses a short jittered delay if neither is
+usable. If the requested wait exceeds 60 seconds, the service forbids a retry,
+or the retry also fails, review stops and the PowerPoint draft remains available.
+Local GPT PPTX output replaces paragraph text in existing shapes
+and tables, retaining the first run's styling; mixed inline formatting and text
+fit need manual review. Text that cannot fit a region, missing OCR coordinates, and
+unsupported PDF character sets produce explicit errors rather than silently dropping
+text. PDF geometry or text-fit failures instead produce a clearly labeled reflowed
+PDF, with `reconstruction.mode=reflowed-pdf` and a prominent layout limitation in the
+report. This preserves PDF format but not original artwork or layout. A translation
+TXT checkpoint marked not reviewed is saved before reconstruction, so reconstruction
+or review failure does not discard the completed translation; failed jobs expose a
+download link for it. Reconstruction is reported separately from translation.
+Exact artwork reconstruction, arbitrary scripts, rotated text,
+and complex PDF crop/rotation layouts are not certified. Quality scores do not assess
+these reconstruction limitations. `outputFile` in the report identifies the main
+download; older saved TXT results remain accessible unchanged.
+
+The local UI and CLI also accept **DOCX up to 10 MiB** and return `translated.docx`
+plus the text sidecar for all three strategies. Native paragraphs (including table
+cells, text boxes, headers, footers, footnotes and endnotes) are extracted locally;
+Word files do not require OCR. Original package parts and embedded images are
+retained. Each paragraph's translated text uses its first text run's formatting;
+mixed inline styles, hyperlinks spanning only part of a paragraph, and pagination
+require manual review. Text inside images, comments, and metadata remains unchanged.
+Accept tracked changes and convert dynamic fields (including automatic tables of
+contents and page numbers) to plain text before uploading; these inputs are rejected
+explicitly to avoid corrupting field behavior. DOCX support is local-only; production
+HTTP intake is unchanged. Review bypass also applies to DOCX.
+
+Both local UIs support translation in either direction between English (`en`),
+Spanish (`es`), and Italian (`it`). Choose different source and target languages;
+all file formats and strategies use the selected pair. Upload your own document
+for English or Spanish sources; built-in samples remain Italian. The local API
+accepts `sourceLanguage` and `targetLanguage` (defaults `it` and `en`); result
+headings use the languages recorded in the report. CLI equivalents are
+`--source-language en --target-language es`.
+
+**XLSX workbooks up to 10 MiB** are supported by the local UI and CLI across all
+three strategies, returning `translated.xlsx` and a text sidecar. Literal shared-
+string and inline-string cells are translated, including hidden sheets. Formula
+cells and their cached results, numbers, dates, booleans, sheet names, charts,
+images, comments, links and metadata are retained unchanged. Translations are
+written as literal strings (never executable formulas). Text-dependent formulas
+may produce different results when their referenced text changes. Original cell
+styles, merges, dimensions and workbook parts are retained; rich-text translations
+use the first text run's style. Text fit is not automatically adjusted. Chart text,
+image text and comments are not translated. Legacy XLS, XLSB, and macro-enabled
+XLSM files are unsupported. Review warnings appear in the report and text sidecar,
+not by modifying workbook cells. Production HTTP intake is unchanged.
 
 Put unquoted `NAME=value` settings in the ignored `.env`: `TRANSLATOR_ENDPOINT`,
 `DOCINTEL_ENDPOINT`, the Foundry settings and pinned agent versions described above,
@@ -433,7 +645,7 @@ orphan batch; automatic POST retries are deliberately disabled. Inspect the job 
 
 ```bash
 PYTHONPATH=src:. python scripts/translator_spike.py
-# A: Translator only, B: customer outputs named like the samples, C: full HTTP pipeline
+# Compares Translator, direct GPT, Translator + GPT refinement, customer baseline and production pipeline
 PYTHONPATH=src:. python eval/run_eval.py --output eval/results.csv
 # Reverse-direction spike using your own English input:
 PYTHONPATH=src:. python scripts/translator_spike.py --file /path/english.pdf --source en --target it
@@ -441,15 +653,46 @@ PYTHONPATH=src:. python scripts/translator_spike.py --file /path/english.pdf --s
 
 Put customer baseline PDFs/PPTX in `eval/baseline/` under the original sample filenames.
 The directory is ignored to avoid committing customer documents. Missing files produce explicit
-`baseline_missing` CSV rows. All available arms use the same reviewer and seeded oracle.
-For flagged C jobs, the evaluator reads the original private Translator output after verifying
+`baseline_missing` CSV rows. The three translation strategies and production pipeline use the
+same reviewer and seeded oracle. For flagged production-pipeline jobs, the evaluator reads the
+original private Translator output after verifying
 the protected result endpoint, so the required review banner is not scored as a translation addition.
 CSV includes per-document score, counts by issue type, Pass A misses against seeded values,
-latency, characters, images, pipeline tokens and separate evaluation tokens. Baseline historical
-latency/usage is unknown and remains blank, not fabricated as zero. The live evaluation
-requires an Entra identity with API scope/role and permission to call the pinned Foundry agents.
+latency, Translator characters, image counts, model/deployment, model input/output tokens, pipeline
+tokens and separate evaluation tokens. GPT model and latency fields are blank for arms that do not
+use a GPT translation model. Baseline historical latency/usage is unknown and remains blank, not
+fabricated as zero. The live evaluation requires an Entra identity with API scope/role and permission
+to call the pinned Foundry agents.
 
 ## Limitations and acceptance boundaries
+
+### Local showcase handoff
+
+- Start the comparison UI with `.\scripts\run-showcase.ps1 -SkipReview` to
+  run translation without either automated reviewer. Outputs are marked
+  `not_reviewed`; review-driven hybrid escalation is unavailable in this mode.
+  The local showcase does not run the Durable Functions orchestration and does
+  not require Copilot Studio.
+- For PowerPoint decks with pictures, editable text is replaced in the
+  existing shapes and table cells. Pictures stay unchanged, and detected
+  picture text is translated in the companion TXT by slide. Review text fit
+  and mixed inline formatting manually; unchanged shape geometry is not proof
+  of pixel-perfect layout.
+- Glossary selection is independent of automated review. GPT translation uses
+  selected terms as prompt guidance; compatible Office Document Translation
+  requests can submit a glossary. The OCR-to-Translator-Text path, used for
+  PDFs and image-bearing PPTX, does not apply the glossary.
+- Compare engines on the same synthetic inputs and options. Record end-to-end
+  time and per-stage timing separately; compare terminology accuracy and
+  document fidelity against a reference, not against reviewer scores alone.
+  GPT runs can report input and output tokens; Translator Text reports
+  character usage when metering is available. Missing usage is not zero.
+- For a smaller customer repository, start from a reviewed source allowlist
+  and synthetic fixtures, not a fork or a copy of this checkout. Add only
+  the launchers, UI, runtime modules, configuration templates, and tests
+  needed for the chosen workflow. Exclude customer inputs and outputs, local
+  environment files, deployment identifiers, and Git history. Verify the
+  result from a clean checkout before sharing.
 
 * **PDF mode:** the published 2026-03-01 OpenAPI does not define the previously proposed
   `pdfDocumentIntelligence`/`useDocumentIntelligence` flags. No invented field is sent. Verify

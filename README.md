@@ -4,6 +4,29 @@ Durable Functions workflow: **submit → precheck → prepare → translate → 
 PDF/PPTX input, default source auto-detection and English output, with reverse translation to
 Italian or Spanish. Copilot Studio calls an Entra-protected HTTP API.
 
+## Documentation map
+
+- [AZURE-TODO.md](AZURE-TODO.md) — live Azure, Entra, agent, renderer, and acceptance checklist
+- [infra/README.md](infra/README.md) — azd/Bicep inputs, outputs, retention, and deployment contract
+- [.env.sample](.env.sample) — local configuration template
+- [Limitations and acceptance boundaries](#limitations-and-acceptance-boundaries) — customer-safe scope and verification claims
+
+## POC status
+
+The repository contains a working local comparison workflow and a deployed-shape Azure
+Durable Functions implementation. It does not demonstrate that the live tenant, all service
+models, or document-fidelity requirements have passed acceptance. Use [AZURE-TODO.md](AZURE-TODO.md)
+to complete and record live validation.
+
+| Area | Included | Not yet completed |
+|---|---|---|
+| Translation | Azure Translator, GPT adapters, glossary, document reconstruction | Customer-specific quality threshold approval |
+| Review | Deterministic checks and pinned Foundry prompt-agent reviews | Calibrated false-positive/false-negative acceptance on customer documents |
+| Local demo | Offline validation, synthetic showcase, no-key local pipeline | Production authentication and tenant-specific identity setup |
+| Production API | Entra-protected submit/poll/report/result contract | Live tenant acceptance and Copilot Studio wiring |
+| Delivery | Local downloads and authenticated SharePoint/OneDrive flow | Teams/email notification implementation |
+| Security | Managed identity, private blob/job text, loopback-only local UI | Private networking, malware scanning, and a full enterprise security review |
+
 **Implementation is not evidence of deployment.** Local checks use synthetic files and mocked
 Azure boundaries. Live agent smoke tests do not establish full-pipeline acceptance. Complete
 [AZURE-TODO.md](AZURE-TODO.md) before claiming live acceptance. In particular, the Translator
